@@ -747,6 +747,37 @@ class CPU:
                 }[mnemonic]
                 self._state.a.value = value
                 self._update_nz(value)
+        elif mnemonic in {"CMP", "CPX", "CPY"}:
+            result = self.resolve_addressing(definition.addressing_mode)
+            page_crossed = result.page_crossed
+            if result.operand is None:
+                raise ValueError(f"{mnemonic} requires an operand")
+            register = {
+                "CMP": self._state.a,
+                "CPX": self._state.x,
+                "CPY": self._state.y,
+            }[mnemonic]
+            difference = (register.value - result.operand) & 0xFF
+            self._state.status.carry = register.value >= result.operand
+            self._update_nz(difference)
+        elif mnemonic in {"INC", "DEC"}:
+            result = self.resolve_addressing(definition.addressing_mode)
+            if result.address is None or result.operand is None:
+                raise ValueError(f"{mnemonic} requires a memory operand")
+            value = (result.operand + (1 if mnemonic == "INC" else -1)) & 0xFF
+            self._memory.write_byte(result.address, result.operand)
+            self._memory.write_byte(result.address, value)
+            self._update_nz(value)
+        elif mnemonic in {"INX", "INY", "DEX", "DEY"}:
+            register = {
+                "INX": self._state.x,
+                "INY": self._state.y,
+                "DEX": self._state.x,
+                "DEY": self._state.y,
+            }[mnemonic]
+            delta = 1 if mnemonic in {"INX", "INY"} else -1
+            register.value = (register.value + delta) & 0xFF
+            self._update_nz(register.value)
         elif mnemonic in {"LDA", "LDX", "LDY"}:
             result = self.resolve_addressing(definition.addressing_mode)
             page_crossed = result.page_crossed
