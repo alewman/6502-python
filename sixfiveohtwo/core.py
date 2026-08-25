@@ -787,6 +787,19 @@ class CPU:
         """Execute implemented register, transfer, and logical families."""
         mnemonic = definition.mnemonic
         page_crossed = False
+        if mnemonic == "JMP":
+            result = self.resolve_addressing(definition.addressing_mode)
+            if result.address is None:
+                raise ValueError("JMP requires a target address")
+            self._state.pc.value = result.address
+            return definition.cycles
+        if mnemonic == "JSR":
+            result = self.resolve_addressing(AddressingMode.ABSOLUTE)
+            if result.address is None:
+                raise ValueError("JSR requires a target address")
+            self._push_word((self._state.pc.value - 1) & 0xFFFF)
+            self._state.pc.value = result.address
+            return definition.cycles
         if mnemonic in {"BCC", "BCS", "BEQ", "BMI", "BNE", "BPL", "BVC", "BVS"}:
             result = self.resolve_relative_address()
             conditions = {
@@ -961,6 +974,16 @@ class CPU:
         if mnemonic == "PLP":
             self._pop_status()
             return 4, None, ()
+        if mnemonic == "PHA":
+            self._push_byte(self._state.a.value)
+            return 3, None, ()
+        if mnemonic == "PLA":
+            self._state.a.value = self._pop_byte()
+            self._update_nz(self._state.a.value)
+            return 4, None, ()
+        if mnemonic == "RTS":
+            self._state.pc.value = (self._pop_word() + 1) & 0xFFFF
+            return 6, None, ()
         return None
 
     def step(self, *, cycles: int = 0) -> InstructionStep | ResetStep | InterruptStep:
