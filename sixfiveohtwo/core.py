@@ -67,12 +67,37 @@ class UnsupportedOpcodeError(ValueError):
 
 @dataclass(frozen=True)
 class OpcodeDefinition:
-    """Metadata used to route an official opcode to its future handler."""
+    """Canonical routing and timing metadata for an official opcode."""
 
     opcode: int
     mnemonic: str
     addressing_mode: AddressingMode
     cycles: int
+    page_cross_penalty: bool = False
+
+    @property
+    def operand_bytes(self) -> int:
+        """Number of bytes after the opcode in this instruction."""
+        return {
+            AddressingMode.ACCUMULATOR: 0,
+            AddressingMode.IMPLIED: 0,
+            AddressingMode.RELATIVE: 1,
+            AddressingMode.IMMEDIATE: 1,
+            AddressingMode.ZERO_PAGE: 1,
+            AddressingMode.ZERO_PAGE_X: 1,
+            AddressingMode.ZERO_PAGE_Y: 1,
+            AddressingMode.INDEXED_INDIRECT: 1,
+            AddressingMode.INDIRECT_INDEXED: 1,
+            AddressingMode.ABSOLUTE: 2,
+            AddressingMode.ABSOLUTE_X: 2,
+            AddressingMode.ABSOLUTE_Y: 2,
+            AddressingMode.INDIRECT: 2,
+        }[self.addressing_mode]
+
+    @property
+    def length(self) -> int:
+        """Total encoded instruction length, including its opcode byte."""
+        return 1 + self.operand_bytes
 
 
 # The catalog deliberately contains metadata only. Instruction semantics are added
@@ -217,6 +242,12 @@ _OPCODE_ROWS = (
 
 def _build_opcode_catalog() -> Mapping[int, OpcodeDefinition]:
     catalog: dict[int, OpcodeDefinition] = {}
+    page_penalty_mnemonics = {"ADC", "AND", "CMP", "EOR", "LDA", "ORA", "SBC"}
+    page_penalty_modes = {
+        AddressingMode.ABSOLUTE_X,
+        AddressingMode.ABSOLUTE_Y,
+        AddressingMode.INDIRECT_INDEXED,
+    }
     for opcodes, mnemonic, modes, cycles in _OPCODE_ROWS:
         for opcode, mode, cycle in zip(
             (int(value, 16) for value in opcodes.split()),
@@ -224,11 +255,31 @@ def _build_opcode_catalog() -> Mapping[int, OpcodeDefinition]:
             (int(value) for value in cycles.split()),
             strict=True,
         ):
-            catalog[opcode] = OpcodeDefinition(opcode, mnemonic, mode, cycle)
+            catalog[opcode] = OpcodeDefinition(
+                opcode,
+                mnemonic,
+                mode,
+                cycle,
+                mnemonic in page_penalty_mnemonics and mode in page_penalty_modes,
+            )
     return MappingProxyType(catalog)
 
 
 OFFICIAL_OPCODES = _build_opcode_catalog()
+
+
+def decode_opcode(opcode: int) -> OpcodeDefinition:
+    """Decode one byte into canonical official-opcode metadata."""
+    if isinstance(opcode, bool) or not isinstance(opcode, int):
+        raise TypeError("opcode must be an integer byte")
+    if not 0x00 <= opcode <= 0xFF:
+        raise ValueError("opcode must fit in 8 bits")
+    try:
+        return OFFICIAL_OPCODES[opcode]
+    except KeyError as exc:
+        raise UnsupportedOpcodeError(
+            f"unsupported or unofficial opcode: 0x{opcode:02X}"
+        ) from exc
 
 
 @dataclass(frozen=True)
@@ -616,22 +667,8 @@ class CPU:
 
     @staticmethod
     def dispatch_opcode(opcode: int) -> OpcodeDefinition:
-        """Return the official routing metadata for one opcode byte.
-
-        This is intentionally a metadata-only dispatch point. A later phase can
-        attach instruction handlers while retaining this explicit illegal-opcode
-        boundary.
-        """
-        if isinstance(opcode, bool) or not isinstance(opcode, int):
-            raise TypeError("opcode must be an integer byte")
-        if not 0x00 <= opcode <= 0xFF:
-            raise ValueError("opcode must fit in 8 bits")
-        try:
-            return OFFICIAL_OPCODES[opcode]
-        except KeyError as exc:
-            raise UnsupportedOpcodeError(
-                f"unsupported or unofficial opcode: 0x{opcode:02X}"
-            ) from exc
+        """Return canonical official routing metadata for one opcode byte."""
+        return decode_opcode(opcode)
 
     def _accept_reset(self, boundary: InterruptBoundary) -> ResetStep:
         """Load the reset vector and apply RESET's persistent flag effect."""
@@ -756,6 +793,7 @@ __all__ = (
     "NMIStep",
     "NmiStep",
     "OFFICIAL_OPCODES",
+    "decode_opcode",
     "ResetStep",
     "OpcodeDefinition",
     "UnsupportedOpcodeError",
