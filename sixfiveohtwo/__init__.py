@@ -13,6 +13,7 @@ from .memory import MemoryBus
 def __getattr__(name: str):
     if name in {
         "Accumulator",
+        "CPU",
         "CPUState",
         "IndexRegister",
         "IndexRegisters",
@@ -24,10 +25,12 @@ def __getattr__(name: str):
         "StackPointer",
         "StatusFlags",
     }:
-        module_name = ".interrupts" if name in {
-            "InterruptBoundary",
-            "InterruptLines",
-        } else ".cpu"
+        if name == "CPU":
+            module_name = ".core"
+        elif name in {"InterruptBoundary", "InterruptLines"}:
+            module_name = ".interrupts"
+        else:
+            module_name = ".cpu"
         module = _import_module(module_name, __name__)
         try:
             return getattr(module, name)

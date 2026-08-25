@@ -11,24 +11,27 @@ The host supplies a byte-addressable `MemoryBus` implementation with
 interrupt inputs are represented by `InterruptLines`:
 
 ```python
-from sixfiveohtwo import InterruptLines
+from sixfiveohtwo import CPU
 
-lines = InterruptLines()
-lines.set_irq(True)       # IRQ is a level; keep it asserted as needed.
-lines.set_reset(True)     # RESET is also level-sensitive.
-lines.set_nmi(True)       # NMI latches this low-to-high edge.
-inputs = lines.sample_instruction_boundary()
+cpu = CPU(host_memory)       # host_memory implements MemoryBus
+cpu.set_irq(True)            # IRQ is a level; keep it asserted as needed.
+cpu.set_reset(True)          # RESET is also level-sensitive.
+cpu.set_nmi(True)            # NMI latches this low-to-high edge.
+inputs = cpu.sample_instruction_boundary()
 ```
 
-`sample_instruction_boundary()` returns an immutable `InterruptBoundary`.
-RESET and IRQ report their levels on every sample. NMI reports and consumes a
-pending rising edge; it will not retrigger until NMI is driven low and high
-again. `signal_nmi()` is available when a host wants to submit an NMI edge
-without maintaining a line level.
+`CPU` owns a mutable `CPUState` in `cpu.state`, while `cpu.memory` remains the
+host-provided `MemoryBus` and `cpu.lines` exposes the shared line object. The
+line setters (`set_reset`, `set_irq`, and `set_nmi`) and `signal_nmi()` are
+available directly on the core. `pending_interrupt_boundary()` inspects input
+state without consuming NMI; `sample_instruction_boundary()` returns an
+immutable `InterruptBoundary` and consumes a pending NMI edge. RESET and IRQ
+report their levels on every sample, while NMI will not retrigger until driven
+low and high again.
 
-The boundary model only communicates host input state. Vector fetch,
-interrupt entry, reset sequencing, and instruction execution are intentionally
-reserved for later core phases.
+The shell only communicates host input state. It does not yet execute
+instructions, fetch vectors, perform reset sequencing, or implement a memory
+map or devices; those belong to later core phases.
 
 ## v1 scope
 
