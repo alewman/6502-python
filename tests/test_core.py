@@ -13,6 +13,8 @@ from sixfiveohtwo import (
 from sixfiveohtwo.core import (
     InstructionContext,
     InstructionStep,
+    OpcodeDefinition,
+    UnsupportedOpcodeError,
     _normalize_byte_address,
     _normalize_word_address,
 )
@@ -216,7 +218,7 @@ def test_step_samples_boundary_fetches_one_opcode_and_prepares_context():
 
 def test_step_without_execution_records_no_cycles_and_consumes_nmi_once():
     memory = HostMemory()
-    memory.bytes[0] = 0xEA
+    memory.bytes.update({0: 0xEA, 1: 0xEA})
     cpu = CPU(memory)
     cpu.signal_nmi()
 
@@ -466,3 +468,32 @@ def test_relative_addressing_decodes_offset_wraps_target_and_preserves_sequentia
     )
     assert result.sequential_pc == (start + 1) & 0xFFFF
     assert cpu.state.pc.value == (start + 1) & 0xFFFF
+
+
+def test_step_routes_an_official_opcode_to_addressing_metadata():
+    memory = HostMemory()
+    memory.bytes[0] = 0xA9
+    cpu = CPU(memory)
+
+    result = cpu.step()
+
+    assert result.definition == OpcodeDefinition(
+        0xA9, "LDA", AddressingMode.IMMEDIATE, 2
+    )
+    assert memory.operations == [("read", 0)]
+
+
+@pytest.mark.parametrize("opcode", [0x02, 0xFF])
+def test_step_rejects_unsupported_opcodes_deterministically(opcode):
+    memory = HostMemory()
+    memory.bytes[0] = opcode
+    cpu = CPU(memory)
+
+    with pytest.raises(
+        UnsupportedOpcodeError,
+        match=rf"unsupported or unofficial opcode: 0x{opcode:02X}",
+    ):
+        cpu.step()
+
+    assert cpu.state.pc.value == 1
+    assert cpu.state.cycles == 0

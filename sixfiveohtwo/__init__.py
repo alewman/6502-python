@@ -16,6 +16,8 @@ def __getattr__(name: str):
         "AddressingMode",
         "AddressingResult",
         "CPU",
+        "OpcodeDefinition",
+        "UnsupportedOpcodeError",
         "CPUState",
         "IndexRegister",
         "IndexRegisters",
@@ -27,7 +29,13 @@ def __getattr__(name: str):
         "StackPointer",
         "StatusFlags",
     }:
-        if name in {"CPU", "AddressingMode", "AddressingResult"}:
+        if name in {
+            "CPU",
+            "AddressingMode",
+            "AddressingResult",
+            "OpcodeDefinition",
+            "UnsupportedOpcodeError",
+        }:
             module_name = ".core"
         elif name in {"InterruptBoundary", "InterruptLines"}:
             module_name = ".interrupts"
