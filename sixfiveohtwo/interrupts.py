@@ -88,11 +88,15 @@ class InterruptLines:
         """Latch an NMI signal without requiring a persistent host line."""
         self._nmi_pending = True
 
-    def sample_instruction_boundary(self) -> InterruptBoundary:
-        """Return line state for a boundary and consume the pending NMI edge."""
-        sample = InterruptBoundary(
+    def pending_interrupt_boundary(self) -> InterruptBoundary:
+        """Inspect the current boundary inputs without consuming NMI."""
+        return InterruptBoundary(
             reset=self._reset, irq=self._irq, nmi=self._nmi_pending
         )
+
+    def sample_instruction_boundary(self) -> InterruptBoundary:
+        """Return line state for a boundary and consume the pending NMI edge."""
+        sample = self.pending_interrupt_boundary()
         self._nmi_pending = False
         return sample
 
