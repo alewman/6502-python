@@ -111,13 +111,47 @@ class IndexRegisters:
             raise TypeError("x and y must be index registers or integers")
 
 
+def pack_status_byte(flags: "StatusFlags", *, break_flag: bool = False) -> int:
+    """Pack persistent flags into an NMOS stack/observed status byte.
+
+    Bit 5 is always one. B is supplied by the operation that creates the
+    byte and is never stored in ``StatusFlags``.
+    """
+    if not isinstance(flags, StatusFlags):
+        raise TypeError("flags must be StatusFlags")
+    if not isinstance(break_flag, bool):
+        raise TypeError("break_flag must be a boolean")
+    return (
+        (int(flags.negative) << 7)
+        | (int(flags.overflow) << 6)
+        | 0x20
+        | (int(break_flag) << 4)
+        | (int(flags.decimal) << 3)
+        | (int(flags.interrupt_disable) << 2)
+        | (int(flags.zero) << 1)
+        | int(flags.carry)
+    )
+
+
+def unpack_status_byte(value: int) -> "StatusFlags":
+    """Unpack an observed or stacked status byte into persistent flags."""
+    value = _require_byte(value, "status byte")
+    return StatusFlags(
+        negative=bool(value & 0x80),
+        overflow=bool(value & 0x40),
+        decimal=bool(value & 0x08),
+        interrupt_disable=bool(value & 0x04),
+        zero=bool(value & 0x02),
+        carry=bool(value & 0x01),
+    )
+
+
 @dataclass
 class StatusFlags:
     """The physical NMOS 6502 status flags.
 
-    The break (B) bit is intentionally absent: it is an instruction/stack
-    context bit, not a persistent latch in the processor status register.
-    Bit 5 is always set when this state is represented as a status byte.
+    B is an instruction/stack context bit, not persistent CPU state. Bit 5 is
+    set whenever these flags are packed as a status byte.
     """
 
     negative: bool = False
@@ -140,32 +174,13 @@ class StatusFlags:
                 raise TypeError(f"{name} must be a boolean")
 
     def to_byte(self, *, break_flag: bool = False) -> int:
-        """Encode flags for a status-byte transfer, optionally setting B."""
-        if not isinstance(break_flag, bool):
-            raise TypeError("break_flag must be a boolean")
-        return (
-            (int(self.negative) << 7)
-            | (int(self.overflow) << 6)
-            | 0x20
-            | (int(break_flag) << 4)
-            | (int(self.decimal) << 3)
-            | (int(self.interrupt_disable) << 2)
-            | (int(self.zero) << 1)
-            | int(self.carry)
-        )
+        """Compatibility wrapper for :func:`pack_status_byte`."""
+        return pack_status_byte(self, break_flag=break_flag)
 
     @classmethod
-    def from_byte(cls, value: int) -> StatusFlags:
-        """Decode a status byte, discarding its context-only B bit."""
-        value = _require_byte(value, "status byte")
-        return cls(
-            negative=bool(value & 0x80),
-            overflow=bool(value & 0x40),
-            decimal=bool(value & 0x08),
-            interrupt_disable=bool(value & 0x04),
-            zero=bool(value & 0x02),
-            carry=bool(value & 0x01),
-        )
+    def from_byte(cls, value: int) -> "StatusFlags":
+        """Compatibility wrapper for :func:`unpack_status_byte`."""
+        return unpack_status_byte(value)
 
 
 @dataclass
@@ -241,4 +256,6 @@ __all__ = (
     "Register16",
     "StackPointer",
     "StatusFlags",
+    "pack_status_byte",
+    "unpack_status_byte",
 )
