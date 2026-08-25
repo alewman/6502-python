@@ -6,3 +6,4 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+/tests/6502_test_vectors/
