@@ -1,6 +1,15 @@
 import pytest
 
-from sixfiveohtwo import CPU, CPUState, InterruptBoundary, InterruptLines, MemoryBus
+from sixfiveohtwo import (
+    CPU,
+    AddressingMode,
+    AddressingResult,
+    CPUState,
+    IndexRegisters,
+    InterruptBoundary,
+    InterruptLines,
+    MemoryBus,
+)
 from sixfiveohtwo.core import (
     InstructionContext,
     InstructionStep,
@@ -229,6 +238,113 @@ def test_cycle_accounting_rejects_invalid_values(cycles):
         cpu.record_cycles(cycles)
     with pytest.raises((TypeError, ValueError)):
         cpu.step(cycles=cycles)
+
+
+@pytest.mark.parametrize(
+    ("mode", "operand_bytes", "state", "memory_bytes", "expected"),
+    [
+        (
+            AddressingMode.IMMEDIATE,
+            (0xA5,),
+            CPUState(program_counter=0x1000),
+            {},
+            AddressingResult(AddressingMode.IMMEDIATE, None, 0xA5),
+        ),
+        (
+            AddressingMode.ZERO_PAGE,
+            (0x42,),
+            CPUState(program_counter=0x1000),
+            {0x0042: 0xB6},
+            AddressingResult(AddressingMode.ZERO_PAGE, 0x42, 0xB6),
+        ),
+        (
+            AddressingMode.ZERO_PAGE_X,
+            (0xF8,),
+            CPUState(program_counter=0x1000, index=IndexRegisters(x=8)),
+            {0x0000: 0xD8},
+            AddressingResult(AddressingMode.ZERO_PAGE_X, 0x00, 0xD8),
+        ),
+        (
+            AddressingMode.ZERO_PAGE_Y,
+            (0xF8,),
+            CPUState(program_counter=0x1000, index=IndexRegisters(y=8)),
+            {0x0000: 0xE9},
+            AddressingResult(AddressingMode.ZERO_PAGE_Y, 0x00, 0xE9),
+        ),
+        (
+            AddressingMode.ABSOLUTE,
+            (0x34, 0x12),
+            CPUState(program_counter=0x1000),
+            {0x1234: 0xC7},
+            AddressingResult(AddressingMode.ABSOLUTE, 0x1234, 0xC7),
+        ),
+        (
+            AddressingMode.ABSOLUTE_Y,
+            (0x34, 0x12),
+            CPUState(program_counter=0x1000, index=IndexRegisters(y=2)),
+            {0x1236: 0xF8},
+            AddressingResult(AddressingMode.ABSOLUTE_Y, 0x1236, 0xF8),
+        ),
+    ],
+)
+def test_addressing_resolution_forms_operand_and_effective_address(
+    mode, operand_bytes, state, memory_bytes, expected
+):
+    memory = HostMemory()
+    memory.bytes.update(
+        dict(zip(range(0x1000, 0x1000 + len(operand_bytes)), operand_bytes))
+    )
+    memory.bytes.update(memory_bytes)
+    cpu = CPU(memory, state=state)
+
+    assert cpu.resolve_addressing(mode) == expected
+    assert cpu.state.pc.value == 0x1000 + len(operand_bytes)
+
+
+@pytest.mark.parametrize(
+    ("mode", "index"),
+    [
+        (AddressingMode.ZERO_PAGE_X, {"x": 0x11}),
+        (AddressingMode.ZERO_PAGE_Y, {"y": 0x11}),
+    ],
+)
+def test_indexed_zero_page_wraps_the_register_index_in_zero_page(mode, index):
+    memory = HostMemory()
+    memory.bytes.update({0: 0xF8, 0x09: 0xA5})
+    cpu = CPU(memory, state=CPUState(index=IndexRegisters(**index)))
+
+    result = cpu.resolve_addressing(mode)
+
+    assert result == AddressingResult(mode, 0x09, 0xA5)
+
+
+@pytest.mark.parametrize(
+    ("mode", "index"),
+    [
+        (AddressingMode.ABSOLUTE_X, {"x": 1}),
+        (AddressingMode.ABSOLUTE_Y, {"y": 1}),
+    ],
+)
+def test_indexed_absolute_reports_page_crossing_and_wraps_address(mode, index):
+    memory = HostMemory()
+    memory.bytes.update({0: 0xFF, 1: 0xFF})
+    cpu = CPU(memory, state=CPUState(index=IndexRegisters(**index)))
+
+    result = cpu.resolve_addressing(mode)
+
+    assert result == AddressingResult(mode, 0, 0xFF, True)
+
+
+@pytest.mark.parametrize("mode", [AddressingMode.ACCUMULATOR, AddressingMode.IMPLIED])
+def test_register_and_implied_modes_do_not_read_memory(mode):
+    memory = HostMemory()
+    cpu = CPU(memory, state=CPUState(accumulator=0xA5))
+
+    result = cpu.resolve_addressing(mode)
+
+    expected_operand = 0xA5 if mode is AddressingMode.ACCUMULATOR else None
+    assert result == AddressingResult(mode, None, expected_operand)
+    assert memory.operations == []
 
 
 @pytest.mark.parametrize("argument", [None, object()])
