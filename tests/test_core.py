@@ -8,7 +8,10 @@ from sixfiveohtwo import (
     IndexRegisters,
     InterruptBoundary,
     InterruptLines,
+    IRQStep,
     MemoryBus,
+    NMIStep,
+    StatusFlags,
 )
 from sixfiveohtwo.core import (
     OpcodeDefinition,
@@ -328,20 +331,79 @@ def test_reset_lifecycle_always_accounts_for_seven_cycles():
     assert cpu.state.cycles == 10
 
 
-def test_step_without_execution_records_no_cycles_and_consumes_nmi_once():
+def test_irq_pushes_pc_and_status_clears_break_sets_i_and_loads_irq_vector():
     memory = HostMemory()
-    memory.bytes.update({0: 0xEA, 1: 0xEA})
-    cpu = CPU(memory)
+    memory.bytes.update({0xFFFE: 0x78, 0xFFFF: 0x56})
+    state = CPUState(
+        program_counter=0x1234,
+        stack_pointer=0xFD,
+        status=StatusFlags(carry=True),
+    )
+    cpu = CPU(memory, state=state)
+    cpu.set_irq(True)
+
+    result = cpu.step(cycles=99)
+
+    assert isinstance(result, IRQStep)
+    assert result.vector == 0x5678
+    assert result.cycles == 7
+    assert result.total_cycles == 7
+    assert state.pc.value == 0x5678
+    assert state.sp.value == 0xFA
+    assert state.status.interrupt_disable is True
+    assert memory.bytes[0x01FD] == 0x12
+    assert memory.bytes[0x01FC] == 0x34
+    assert memory.bytes[0x01FB] == 0x21
+    assert memory.operations[-2:] == [("read", 0xFFFE), ("read", 0xFFFF)]
+
+
+def test_nmi_has_priority_over_irq_and_masked_irq_remains_deferred():
+    memory = HostMemory()
+    memory.bytes.update({0xFFFA: 0x00, 0xFFFB: 0x80, 0x0000: 0xEA})
+    state = CPUState(program_counter=0x2345)
+    cpu = CPU(memory, state=state)
+    cpu.set_irq(True)
+    cpu.signal_nmi()
+
+    nmi = cpu.step()
+
+    assert isinstance(nmi, NMIStep)
+    assert nmi.vector == 0x8000
+    assert state.pc.value == 0x8000
+    assert state.status.interrupt_disable is True
+    assert memory.bytes[0x01FB] == 0x20
+
+    # IRQ is level-sensitive, so it is sampled again but remains masked.
+    memory.bytes[0x8000] = 0xEA
+    deferred = cpu.step()
+    assert not isinstance(deferred, (IRQStep, NMIStep))
+    assert deferred.boundary.irq is True
+    assert deferred.opcode == 0xEA
+    assert state.pc.value == 0x8001
+
+    state.status.interrupt_disable = False
+    memory.bytes.update({0xFFFE: 0x00, 0xFFFF: 0x90})
+    irq = cpu.step()
+    assert isinstance(irq, IRQStep)
+    assert irq.vector == 0x9000
+
+
+def test_step_accepts_nmi_once_and_accounts_for_its_vector_lifecycle():
+    memory = HostMemory()
+    memory.bytes.update({0xFFFA: 0x34, 0xFFFB: 0x12})
+    cpu = CPU(memory, state=CPUState(program_counter=0x4567))
     cpu.signal_nmi()
 
     first = cpu.step()
-    second = cpu.step()
-
+    assert isinstance(first, NMIStep)
     assert first.boundary.nmi is True
+    assert first.cycles == 7
+    assert first.total_cycles == 7
+    assert cpu.state.cycles == 7
+    assert cpu.state.pc.value == 0x1234
+
+    second = cpu.step()
     assert second.boundary.nmi is False
-    assert first.cycles == 0
-    assert second.total_cycles == 0
-    assert cpu.state.cycles == 0
 
 
 @pytest.mark.parametrize("cycles", [-1, True, "1"])

@@ -89,11 +89,11 @@ accepted = cpu.sample_instruction_boundary()
 whether NMI is pending without consuming it. `sample_instruction_boundary()`
 returns an immutable `InterruptBoundary` and consumes the pending NMI flag.
 
-This phase implements only line acceptance and pending-state reporting. It
-does **not** execute instructions, perform reset sequencing, fetch interrupt
-vectors, or change CPU state in response to a sampled line. The later interrupt
-implementation will cover the 7-cycle vector execution lifecycle; a boundary
-sample in this phase must not be confused with those seven execution cycles.
+At an instruction boundary, `CPU.step()` accepts RESET first, then pending NMI,
+then an asserted IRQ when the interrupt-disable flag is clear. IRQ and NMI push
+PC and status (with B clear), set I, fetch their vectors, and account for seven
+cycles. A masked IRQ remains asserted and is deferred until interrupts are
+enabled.
 
 ## v1 scope and exclusions
 
