@@ -11,9 +11,8 @@ from sixfiveohtwo import (
     MemoryBus,
 )
 from sixfiveohtwo.core import (
-    InstructionContext,
-    InstructionStep,
     OpcodeDefinition,
+    ResetStep,
     UnsupportedOpcodeError,
     _normalize_byte_address,
     _normalize_word_address,
@@ -260,17 +259,73 @@ def test_step_samples_boundary_fetches_one_opcode_and_prepares_context():
 
     result = cpu.step(cycles=2)
 
-    assert isinstance(result, InstructionStep)
-    assert isinstance(result.context, InstructionContext)
+    assert isinstance(result, ResetStep)
     assert result.boundary == InterruptBoundary(reset=True, irq=False, nmi=True)
-    assert result.opcode == 0xA9
-    assert result.context.opcode_address == 0xFFFF
-    assert result.context.state is state
+    assert result.vector == 0
     assert state.pc.value == 0
-    assert state.cycles == 2
-    assert result.cycles == 2
-    assert result.total_cycles == 2
-    assert memory.operations == [("read", 0xFFFF)]
+    assert state.status.interrupt_disable is True
+    assert state.cycles == 7
+    assert result.cycles == 7
+    assert result.total_cycles == 7
+    assert memory.operations == [("read", 0xFFFC), ("read", 0xFFFD)]
+
+
+def test_reset_loads_vector_little_endian_and_does_not_fetch_instruction():
+    memory = HostMemory()
+    memory.bytes.update({0xFFFC: 0x34, 0xFFFD: 0x12, 0x1234: 0x02})
+    state = CPUState(program_counter=0x2000)
+    cpu = CPU(memory, state=state)
+    cpu.set_reset(True)
+
+    result = cpu.step()
+
+    assert isinstance(result, ResetStep)
+    assert result.vector == 0x1234
+    assert state.pc.value == 0x1234
+    assert memory.operations == [("read", 0xFFFC), ("read", 0xFFFD)]
+
+
+def test_reset_is_accepted_only_when_step_reaches_an_instruction_boundary():
+    memory = HostMemory()
+    memory.bytes.update({0xFFFC: 0x78, 0xFFFD: 0x56})
+    cpu = CPU(memory, state=CPUState(program_counter=0x0042))
+    cpu.set_reset(True)
+
+    assert memory.operations == []
+    result = cpu.step()
+
+    assert isinstance(result, ResetStep)
+    assert result.vector == 0x5678
+
+
+def test_reset_has_priority_over_irq_and_pending_nmi():
+    memory = HostMemory()
+    memory.bytes.update({0xFFFC: 0x00, 0xFFFD: 0x80, 0x8000: 0x02})
+    cpu = CPU(memory)
+    cpu.set_reset(True)
+    cpu.set_irq(True)
+    cpu.signal_nmi()
+
+    result = cpu.step()
+
+    assert isinstance(result, ResetStep)
+    assert result.boundary == InterruptBoundary(reset=True, irq=True, nmi=True)
+    assert cpu.nmi_pending is False
+    assert memory.operations == [("read", 0xFFFC), ("read", 0xFFFD)]
+
+
+def test_reset_lifecycle_always_accounts_for_seven_cycles():
+    memory = HostMemory()
+    memory.bytes.update({0xFFFC: 0x00, 0xFFFD: 0x20})
+    cpu = CPU(memory)
+    cpu.set_reset(True)
+    cpu.record_cycles(3)
+
+    result = cpu.step(cycles=99)
+
+    assert result.cycles == 7
+    assert result.total_cycles == 10
+    assert cpu.state.cycles == 10
 
 
 def test_step_without_execution_records_no_cycles_and_consumes_nmi_once():
