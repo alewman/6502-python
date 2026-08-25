@@ -437,3 +437,32 @@ def test_indirect_indexed_wraps_zero_page_pointer_and_reports_page_crossing():
         ("read", 0x0000),
         ("read", 0x2100),
     ]
+
+
+@pytest.mark.parametrize(
+    ("start", "offset", "expected_target", "expected_offset", "page_crossed"),
+    [
+        (0x1000, 0x05, 0x1006, 5, False),
+        (0x1000, 0xFB, 0x0FFC, -5, True),
+        (0xFFFE, 0x01, 0x0000, 1, True),
+        (0x0000, 0xFE, 0xFFFF, -2, True),
+    ],
+)
+def test_relative_addressing_decodes_offset_wraps_target_and_preserves_sequential_pc(
+    start, offset, expected_target, expected_offset, page_crossed
+):
+    memory = HostMemory()
+    memory.bytes[start] = offset
+    cpu = CPU(memory, state=CPUState(program_counter=start))
+
+    result = cpu.resolve_addressing(AddressingMode.RELATIVE)
+
+    assert result == AddressingResult(
+        AddressingMode.RELATIVE,
+        expected_target,
+        expected_offset,
+        page_crossed,
+        (start + 1) & 0xFFFF,
+    )
+    assert result.sequential_pc == (start + 1) & 0xFFFF
+    assert cpu.state.pc.value == (start + 1) & 0xFFFF
