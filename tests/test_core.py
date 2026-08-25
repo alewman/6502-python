@@ -1,6 +1,7 @@
 import pytest
 
 from sixfiveohtwo import CPU, CPUState, InterruptBoundary, InterruptLines, MemoryBus
+from sixfiveohtwo.core import InstructionContext, InstructionStep
 
 
 class HostMemory:
@@ -123,6 +124,55 @@ def test_cpu_shell_does_not_change_state_or_access_memory_on_lines():
     cpu.set_reset(True)
 
     assert cpu.state == CPUState()
+
+
+def test_step_samples_boundary_fetches_one_opcode_and_prepares_context():
+    memory = HostMemory()
+    memory.bytes[0xFFFF] = 0xA9
+    state = CPUState(program_counter=0xFFFF)
+    cpu = CPU(memory, state=state)
+    cpu.signal_nmi()
+    cpu.set_reset(True)
+
+    result = cpu.step(cycles=2)
+
+    assert isinstance(result, InstructionStep)
+    assert isinstance(result.context, InstructionContext)
+    assert result.boundary == InterruptBoundary(reset=True, irq=False, nmi=True)
+    assert result.opcode == 0xA9
+    assert result.context.opcode_address == 0xFFFF
+    assert result.context.state is state
+    assert state.pc.value == 0
+    assert state.cycles == 2
+    assert result.cycles == 2
+    assert result.total_cycles == 2
+    assert memory.operations == [("read", 0xFFFF)]
+
+
+def test_step_without_execution_records_no_cycles_and_consumes_nmi_once():
+    memory = HostMemory()
+    memory.bytes[0] = 0xEA
+    cpu = CPU(memory)
+    cpu.signal_nmi()
+
+    first = cpu.step()
+    second = cpu.step()
+
+    assert first.boundary.nmi is True
+    assert second.boundary.nmi is False
+    assert first.cycles == 0
+    assert second.total_cycles == 0
+    assert cpu.state.cycles == 0
+
+
+@pytest.mark.parametrize("cycles", [-1, True, "1"])
+def test_cycle_accounting_rejects_invalid_values(cycles):
+    cpu = CPU(HostMemory())
+
+    with pytest.raises((TypeError, ValueError)):
+        cpu.record_cycles(cycles)
+    with pytest.raises((TypeError, ValueError)):
+        cpu.step(cycles=cycles)
 
 
 @pytest.mark.parametrize("argument", [None, object()])
