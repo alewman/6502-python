@@ -19,6 +19,10 @@ def __getattr__(name: str):
         "OpcodeDefinition",
         "UnsupportedOpcodeError",
         "ResetStep",
+        "InterruptStep",
+        "IRQStep",
+        "NMIStep",
+        "NmiStep",
         "CPUState",
         "IndexRegister",
         "IndexRegisters",
@@ -39,6 +43,10 @@ def __getattr__(name: str):
             "OpcodeDefinition",
             "UnsupportedOpcodeError",
             "ResetStep",
+            "InterruptStep",
+            "IRQStep",
+            "NMIStep",
+            "NmiStep",
         }:
             module_name = ".core"
         elif name in {"InterruptBoundary", "InterruptLines"}:
