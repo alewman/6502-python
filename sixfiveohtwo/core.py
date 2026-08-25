@@ -593,14 +593,22 @@ class CPU:
             sequential_pc,
         )
 
-    def resolve_addressing(self, mode: AddressingMode | str) -> AddressingResult:
+    def resolve_addressing(
+        self, mode: AddressingMode | str, *, read_operand: bool = True
+    ) -> AddressingResult:
         """Fetch and resolve one supported instruction addressing form.
 
-        Memory forms read their operand, while accumulator and implied forms do
-        not access the bus. Indexed absolute and indirect-indexed forms report
-        page crossing based on the unindexed and indexed 16-bit addresses.
+        Memory forms read their operand unless ``read_operand`` is false, which
+        lets write instructions resolve an address without reading its target.
+        Indexed absolute and indirect-indexed forms report page crossing based
+        on the unindexed and indexed 16-bit addresses.
         """
+        if not isinstance(read_operand, bool):
+            raise TypeError("read_operand must be a boolean")
         mode = self._coerce_addressing_mode(mode)
+
+        def operand_at(address: int) -> int | None:
+            return self._read_operand(address) if read_operand else None
 
         if mode is AddressingMode.ACCUMULATOR:
             return AddressingResult(mode, None, self._state.a.value)
@@ -613,7 +621,7 @@ class CPU:
 
         if mode is AddressingMode.ZERO_PAGE:
             address = self._fetch_byte()
-            return AddressingResult(mode, address, self._read_operand(address))
+            return AddressingResult(mode, address, operand_at(address))
 
         if mode in (AddressingMode.ZERO_PAGE_X, AddressingMode.ZERO_PAGE_Y):
             index = (
@@ -623,26 +631,24 @@ class CPU:
             )
             base = self._fetch_byte()
             address = _normalize_byte_address(base + index)
-            return AddressingResult(mode, address, self._read_operand(address))
+            return AddressingResult(mode, address, operand_at(address))
 
         if mode is AddressingMode.INDIRECT:
             pointer = self._fetch_word()
             address = self._read_pointer(pointer)
-            return AddressingResult(mode, address, self._read_operand(address))
+            return AddressingResult(mode, address, operand_at(address))
 
         if mode is AddressingMode.INDEXED_INDIRECT:
             pointer = _normalize_byte_address(self._fetch_byte() + self._state.x.value)
             address = self._read_pointer(pointer, zero_page=True)
-            return AddressingResult(mode, address, self._read_operand(address))
+            return AddressingResult(mode, address, operand_at(address))
 
         if mode is AddressingMode.INDIRECT_INDEXED:
             pointer = self._fetch_byte()
             base = self._read_pointer(pointer, zero_page=True)
             address = _normalize_word_address(base + self._state.y.value)
             page_crossed = (base & 0xFF00) != (address & 0xFF00)
-            return AddressingResult(
-                mode, address, self._read_operand(address), page_crossed
-            )
+            return AddressingResult(mode, address, operand_at(address), page_crossed)
 
         if mode not in (
             AddressingMode.ABSOLUTE,
@@ -661,9 +667,7 @@ class CPU:
         else:
             address = _normalize_word_address(base + self._state.y.value)
             page_crossed = (base & 0xFF00) != (address & 0xFF00)
-        return AddressingResult(
-            mode, address, self._read_operand(address), page_crossed
-        )
+        return AddressingResult(mode, address, operand_at(address), page_crossed)
 
     @staticmethod
     def dispatch_opcode(opcode: int) -> OpcodeDefinition:
@@ -717,6 +721,56 @@ class CPU:
             accepted_events=("NMI",) if nmi else ("IRQ",),
         )
 
+    def _update_nz(self, value: int) -> None:
+        self._state.status.zero = value == 0
+        self._state.status.negative = bool(value & 0x80)
+
+    def _execute_instruction(self, definition: OpcodeDefinition) -> int | None:
+        """Execute the implemented register and memory transfer families."""
+        mnemonic = definition.mnemonic
+        page_crossed = False
+        if mnemonic in {"LDA", "LDX", "LDY"}:
+            result = self.resolve_addressing(definition.addressing_mode)
+            page_crossed = result.page_crossed
+            if result.operand is None:
+                raise ValueError(f"{mnemonic} requires an operand")
+            register = {
+                "LDA": self._state.a,
+                "LDX": self._state.x,
+                "LDY": self._state.y,
+            }[mnemonic]
+            register.value = result.operand
+            self._update_nz(register.value)
+        elif mnemonic in {"STA", "STX", "STY"}:
+            result = self.resolve_addressing(
+                definition.addressing_mode, read_operand=False
+            )
+            if result.address is None:
+                raise ValueError(f"{mnemonic} requires a memory address")
+            value = {
+                "STA": self._state.a,
+                "STX": self._state.x,
+                "STY": self._state.y,
+            }[mnemonic].value
+            self._memory.write_byte(result.address, value)
+        elif mnemonic in {"TAX", "TAY", "TSX", "TXA", "TXS", "TYA"}:
+            sources = {
+                "TAX": (self._state.a, self._state.x, True),
+                "TAY": (self._state.a, self._state.y, True),
+                "TSX": (self._state.sp, self._state.x, True),
+                "TXA": (self._state.x, self._state.a, True),
+                "TXS": (self._state.x, self._state.sp, False),
+                "TYA": (self._state.y, self._state.a, True),
+            }
+            source, target, updates_flags = sources[mnemonic]
+            target.value = source.value
+            if updates_flags:
+                self._update_nz(target.value)
+        else:
+            return None
+
+        return definition.cycles + int(definition.page_cross_penalty and page_crossed)
+
     def _execute_lifecycle(
         self, mnemonic: str
     ) -> tuple[int, int | None, tuple[str, ...]] | None:
@@ -762,7 +816,9 @@ class CPU:
         definition = self.dispatch_opcode(opcode)
         lifecycle = self._execute_lifecycle(definition.mnemonic)
         if lifecycle is None:
-            executed_cycles = cycles
+            executed_cycles = self._execute_instruction(definition)
+            if executed_cycles is None:
+                executed_cycles = cycles
             vector = None
             accepted_events = ()
         else:
