@@ -1,7 +1,12 @@
 import pytest
 
 from sixfiveohtwo import CPU, CPUState, InterruptBoundary, InterruptLines, MemoryBus
-from sixfiveohtwo.core import InstructionContext, InstructionStep
+from sixfiveohtwo.core import (
+    InstructionContext,
+    InstructionStep,
+    _normalize_byte_address,
+    _normalize_word_address,
+)
 
 
 class HostMemory:
@@ -35,6 +40,57 @@ class HostDeviceMemory(HostMemory):
             self.device_registers[address] = value
             return
         super().write_byte(address, value)
+
+
+@pytest.mark.parametrize(
+    ("normalizer", "value", "expected"),
+    [
+        (_normalize_byte_address, 0x1234, 0x34),
+        (_normalize_byte_address, -1, 0xFF),
+        (_normalize_word_address, 0x12345, 0x2345),
+        (_normalize_word_address, -1, 0xFFFF),
+    ],
+)
+def test_address_normalization_wraps_to_requested_width(normalizer, value, expected):
+    assert normalizer(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("start", "values", "expected_pc", "expected_value", "addresses"),
+    [
+        (0x0000, (0x12,), 0x0001, 0x12, (0x0000,)),
+        (0xFFFF, (0x34,), 0x0000, 0x34, (0xFFFF,)),
+    ],
+)
+def test_fetch_byte_reads_at_pc_and_wraps_pc(
+    start, values, expected_pc, expected_value, addresses
+):
+    memory = HostMemory()
+    memory.bytes.update(dict(zip(addresses, values)))
+    cpu = CPU(memory, state=CPUState(program_counter=start))
+
+    assert cpu._fetch_byte() == expected_value
+    assert cpu.state.pc.value == expected_pc
+    assert memory.operations == [("read", address) for address in addresses]
+
+
+@pytest.mark.parametrize(
+    ("start", "values", "expected_pc", "expected_word", "addresses"),
+    [
+        (0x0000, (0x34, 0x12), 0x0002, 0x1234, (0x0000, 0x0001)),
+        (0xFFFF, (0x78, 0x56), 0x0001, 0x5678, (0xFFFF, 0x0000)),
+    ],
+)
+def test_fetch_word_reads_little_endian_and_wraps_pc(
+    start, values, expected_pc, expected_word, addresses
+):
+    memory = HostMemory()
+    memory.bytes.update(dict(zip(addresses, values)))
+    cpu = CPU(memory, state=CPUState(program_counter=start))
+
+    assert cpu._fetch_word() == expected_word
+    assert cpu.state.pc.value == expected_pc
+    assert memory.operations == [("read", address) for address in addresses]
 
 
 def test_cpu_owns_state_and_delegates_host_memory_and_lines():

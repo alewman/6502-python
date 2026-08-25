@@ -17,6 +17,20 @@ def _require_cycles(value: int) -> int:
     return value
 
 
+def _normalize_byte_address(address: int) -> int:
+    """Wrap an address to the 8-bit address range."""
+    if isinstance(address, bool) or not isinstance(address, int):
+        raise TypeError("address must be an integer")
+    return address & 0xFF
+
+
+def _normalize_word_address(address: int) -> int:
+    """Wrap an address to the 16-bit address range."""
+    if isinstance(address, bool) or not isinstance(address, int):
+        raise TypeError("address must be an integer")
+    return address & 0xFFFF
+
+
 @dataclass(frozen=True)
 class InstructionContext:
     """Dispatch input prepared at one instruction boundary."""
@@ -141,6 +155,27 @@ class CPU:
         self._state.cycles += cycles
         return self._state.cycles
 
+    @staticmethod
+    def _validate_fetched_byte(value: int) -> int:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError("memory read must return an integer byte")
+        if not 0x00 <= value <= 0xFF:
+            raise ValueError("memory read must return a byte")
+        return value
+
+    def _fetch_byte(self) -> int:
+        """Read one instruction byte and advance the PC with 16-bit wrapping."""
+        address = _normalize_word_address(self._state.pc.value)
+        value = self._validate_fetched_byte(self._memory.read_byte(address))
+        self._state.pc.value = _normalize_word_address(address + 1)
+        return value
+
+    def _fetch_word(self) -> int:
+        """Read a little-endian word from the instruction stream."""
+        low = self._fetch_byte()
+        high = self._fetch_byte()
+        return low | (high << 8)
+
     def step(self, *, cycles: int = 0) -> InstructionStep:
         """Sample inputs and fetch one opcode for dispatch.
 
@@ -150,13 +185,8 @@ class CPU:
         """
         cycles = _require_cycles(cycles)
         boundary = self.sample_instruction_boundary()
-        opcode_address = self._state.pc.value
-        opcode = self._memory.read_byte(opcode_address)
-        if isinstance(opcode, bool) or not isinstance(opcode, int):
-            raise TypeError("memory read must return an integer opcode")
-        if not 0x00 <= opcode <= 0xFF:
-            raise ValueError("memory read must return a byte opcode")
-        self._state.pc.value = (opcode_address + 1) & 0xFFFF
+        opcode_address = _normalize_word_address(self._state.pc.value)
+        opcode = self._fetch_byte()
         total_cycles = self.record_cycles(cycles)
         return InstructionStep(
             context=InstructionContext(
