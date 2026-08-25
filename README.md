@@ -95,8 +95,35 @@ vectors, or change CPU state in response to a sampled line. The later interrupt
 implementation will cover the 7-cycle vector execution lifecycle; a boundary
 sample in this phase must not be confused with those seven execution cycles.
 
-## v1 scope
+## v1 scope and exclusions
 
-The v1 target is the NMOS 6502, with host-provided memory and interrupt lines.
-Unofficial opcodes, 65C02 extensions and differences, and 65816 behavior are
-explicitly out of scope.
+This project is an **embeddable instruction core**, not a complete computer or
+console emulator. The v1 target is the original NMOS 6502 instruction set,
+operating against host-provided memory and interrupt lines.
+
+The planned official opcode scope covers all documented NMOS 6502 instructions:
+ADC, AND, ASL, BCC, BCS, BEQ, BIT, BMI, BNE, BPL, BRK, BVC, BVS, CLC, CLD,
+CLI, CLV, CMP, CPX, CPY, DEC, DEX, DEY, EOR, INC, INX, INY, JMP, JSR, LDA,
+LDX, LDY, LSR, NOP, ORA, PHA, PHP, PLA, PLP, ROL, ROR, RTI, RTS, SBC, SEC,
+SED, SEI, STA, STX, STY, TAX, TAY, TSX, TXA, TXS, and TYA. Their documented
+addressing modes are in scope: accumulator, immediate, implied, relative,
+zero page, zero-page indexed (X or Y), absolute, absolute indexed (X or Y),
+indirect, indexed indirect (X), and indirect indexed (Y), where each mode is
+valid for the corresponding instruction.
+
+Decimal mode is intended to match NMOS 6502 behavior, including BCD ADC and
+SBC arithmetic and the NMOS-specific status-flag results. This is a fidelity
+target for the instruction core, rather than a claim that every host machine's
+surrounding hardware behaves identically.
+
+The v1 core explicitly does **not** provide or emulate:
+
+- unofficial/undocumented opcodes;
+- 65C02 or 65816 instructions, extensions, or behavior;
+- memory maps or machine-specific host machines;
+- cartridges or other devices; or
+- cycle-accurate bus-pin activity or bus-pin timing claims.
+
+The host remains responsible for the memory and device environment around the
+core. See [Embedding](#embedding) for the host-memory and interrupt-line
+contract.
