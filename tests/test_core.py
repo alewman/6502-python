@@ -802,7 +802,7 @@ def test_step_routes_an_official_opcode_to_addressing_metadata():
     assert result.definition == OpcodeDefinition(
         0xA9, "LDA", AddressingMode.IMMEDIATE, 2
     )
-    assert memory.operations == [("read", 0)]
+    assert memory.operations == [("read", 0), ("read", 1)]
 
 
 @pytest.mark.parametrize("opcode", [0x02, 0xFF])
