@@ -43,6 +43,64 @@ def _decode_relative_offset(value: int) -> int:
     return value - 0x100 if value & 0x80 else value
 
 
+def _adc_result(
+    accumulator: int, operand: int, carry: bool, decimal: bool
+) -> tuple[int, bool, bool, bool, bool]:
+    """Return ADC result and flags, retaining NMOS binary intermediate flags."""
+    binary_sum = accumulator + operand + int(carry)
+    binary_result = binary_sum & 0xFF
+    overflow = bool(~(accumulator ^ operand) & (accumulator ^ binary_result) & 0x80)
+    if decimal:
+        adjusted_sum = binary_sum
+        if ((accumulator & 0x0F) + (operand & 0x0F) + int(carry)) > 9:
+            adjusted_sum += 6
+        if adjusted_sum > 0x99:
+            adjusted_sum += 0x60
+        result = adjusted_sum & 0xFF
+        carry_out = adjusted_sum > 0xFF
+    else:
+        result = binary_result
+        carry_out = binary_sum > 0xFF
+    return (
+        result,
+        carry_out,
+        bool(binary_result & 0x80),
+        overflow,
+        binary_result == 0,
+    )
+
+
+def _sbc_result(
+    accumulator: int, operand: int, carry: bool, decimal: bool
+) -> tuple[int, bool, bool, bool, bool]:
+    """Return SBC result and flags, retaining NMOS binary intermediate flags."""
+    borrow = int(not carry)
+    binary_difference = accumulator - operand - borrow
+    binary_result = binary_difference & 0xFF
+    overflow = bool((accumulator ^ binary_result) & (accumulator ^ operand) & 0x80)
+    if decimal:
+        low_difference = (accumulator & 0x0F) - (operand & 0x0F) - borrow
+        high_difference = (accumulator >> 4) - (operand >> 4)
+        if low_difference < 0:
+            low_difference -= 6
+        if low_difference < 0:
+            high_difference -= 1
+        if high_difference < 0:
+            high_difference -= 6
+        result = ((high_difference << 4) | (low_difference & 0x0F)) & 0xFF
+        carry_out = high_difference >= 0
+    else:
+        result = binary_result
+        carry_out = binary_difference >= 0
+    return (
+        result,
+        carry_out,
+        bool(binary_result & 0x80),
+        overflow,
+        binary_result == 0,
+    )
+
+
 class AddressingMode(StrEnum):
     """Addressing forms resolved by the instruction dispatcher."""
 
@@ -729,7 +787,24 @@ class CPU:
         """Execute implemented register, transfer, and logical families."""
         mnemonic = definition.mnemonic
         page_crossed = False
-        if mnemonic in {"ORA", "AND", "EOR", "BIT"}:
+        if mnemonic in {"ADC", "SBC"}:
+            result = self.resolve_addressing(definition.addressing_mode)
+            page_crossed = result.page_crossed
+            if result.operand is None:
+                raise ValueError(f"{mnemonic} requires an operand")
+            arithmetic = _adc_result if mnemonic == "ADC" else _sbc_result
+            value, carry, negative, overflow, zero = arithmetic(
+                self._state.a.value,
+                result.operand,
+                self._state.status.carry,
+                self._state.status.decimal,
+            )
+            self._state.a.value = value
+            self._state.status.carry = carry
+            self._state.status.negative = negative
+            self._state.status.overflow = overflow
+            self._state.status.zero = zero
+        elif mnemonic in {"ORA", "AND", "EOR", "BIT"}:
             result = self.resolve_addressing(definition.addressing_mode)
             page_crossed = result.page_crossed
             if result.operand is None:
