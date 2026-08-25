@@ -403,6 +403,46 @@ class CPU:
         return low | (high << 8)
 
     @staticmethod
+    def _validate_stack_byte(value: int) -> int:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError("stack value must be an integer byte")
+        if not 0x00 <= value <= 0xFF:
+            raise ValueError("stack value must fit in 8 bits")
+        return value
+
+    def _stack_address(self) -> int:
+        """Return the current stack slot in the fixed 6502 stack page."""
+        return 0x0100 | self._state.sp.value
+
+    def _push_byte(self, value: int) -> None:
+        """Push one byte and decrement S with 8-bit wrapping."""
+        value = self._validate_stack_byte(value)
+        self._memory.write_byte(self._stack_address(), value)
+        self._state.sp.value = (self._state.sp.value - 1) & 0xFF
+
+    def _pop_byte(self) -> int:
+        """Increment S with 8-bit wrapping and pop one byte."""
+        self._state.sp.value = (self._state.sp.value + 1) & 0xFF
+        return self._validate_fetched_byte(
+            self._memory.read_byte(self._stack_address())
+        )
+
+    def _push_word(self, value: int) -> None:
+        """Push a word high byte first, as used by 6502 interrupts and JSR."""
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError("stack word must be an integer")
+        if not 0x0000 <= value <= 0xFFFF:
+            raise ValueError("stack word must fit in 16 bits")
+        self._push_byte(value >> 8)
+        self._push_byte(value & 0xFF)
+
+    def _pop_word(self) -> int:
+        """Pop a word low byte first, reversing the 6502 stack order."""
+        low = self._pop_byte()
+        high = self._pop_byte()
+        return low | (high << 8)
+
+    @staticmethod
     def _coerce_addressing_mode(mode: AddressingMode | str) -> AddressingMode:
         if isinstance(mode, AddressingMode):
             return mode

@@ -104,6 +104,63 @@ def test_fetch_word_reads_little_endian_and_wraps_pc(
     assert memory.operations == [("read", address) for address in addresses]
 
 
+def test_stack_byte_push_and_pop_use_stack_page_and_reverse_sp_transition():
+    memory = HostMemory()
+    cpu = CPU(memory, state=CPUState(stack_pointer=0xFD))
+
+    cpu._push_byte(0xA5)
+    assert cpu.state.sp.value == 0xFC
+    assert memory.operations == [("write", 0x01FD, 0xA5)]
+
+    assert cpu._pop_byte() == 0xA5
+    assert cpu.state.sp.value == 0xFD
+    assert memory.operations == [
+        ("write", 0x01FD, 0xA5),
+        ("read", 0x01FD),
+    ]
+
+
+def test_stack_word_pushes_high_byte_first_and_pops_low_byte_first():
+    memory = HostMemory()
+    cpu = CPU(memory, state=CPUState(stack_pointer=0xFD))
+
+    cpu._push_word(0x1234)
+
+    assert cpu.state.sp.value == 0xFB
+    assert memory.operations == [
+        ("write", 0x01FD, 0x12),
+        ("write", 0x01FC, 0x34),
+    ]
+    assert cpu._pop_word() == 0x1234
+    assert cpu.state.sp.value == 0xFD
+    assert memory.operations[-2:] == [
+        ("read", 0x01FC),
+        ("read", 0x01FD),
+    ]
+
+
+def test_stack_pointer_wraps_at_byte_boundaries():
+    memory = HostMemory()
+    cpu = CPU(memory, state=CPUState(stack_pointer=0x00))
+
+    cpu._push_byte(0x7E)
+    assert cpu.state.sp.value == 0xFF
+    assert memory.operations == [("write", 0x0100, 0x7E)]
+
+    assert cpu._pop_byte() == 0x7E
+    assert cpu.state.sp.value == 0x00
+    assert memory.operations[-1] == ("read", 0x0100)
+
+
+def test_stack_page_address_is_selected_from_only_the_stack_pointer_byte():
+    memory = HostMemory()
+    cpu = CPU(memory, state=CPUState(stack_pointer=0xAB))
+
+    cpu._push_byte(0xC3)
+
+    assert memory.operations == [("write", 0x01AB, 0xC3)]
+
+
 def test_cpu_owns_state_and_delegates_host_memory_and_lines():
     memory = HostMemory()
     lines = InterruptLines()
