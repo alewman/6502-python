@@ -4,6 +4,8 @@ The distribution is installed as ``6502-python`` and imported as
 ``sixfiveohtwo``.
 """
 
+from importlib import import_module as _import_module
+
 from .memory import MemoryBus
 
 
@@ -20,9 +22,11 @@ def __getattr__(name: str):
         "StackPointer",
         "StatusFlags",
     }:
-        from . import cpu
-
-        return getattr(cpu, name)
+        cpu = _import_module(".cpu", __name__)
+        try:
+            return getattr(cpu, name)
+        finally:
+            globals().pop("cpu", None)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
