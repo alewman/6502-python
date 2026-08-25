@@ -760,6 +760,31 @@ class CPU:
             difference = (register.value - result.operand) & 0xFF
             self._state.status.carry = register.value >= result.operand
             self._update_nz(difference)
+        elif mnemonic in {"ASL", "LSR", "ROL", "ROR"}:
+            result = self.resolve_addressing(definition.addressing_mode)
+            if result.operand is None:
+                raise ValueError(f"{mnemonic} requires an operand")
+            value = result.operand
+            carry_in = int(self._state.status.carry)
+            if mnemonic == "ASL":
+                self._state.status.carry = bool(value & 0x80)
+                shifted = value << 1
+            elif mnemonic == "LSR":
+                self._state.status.carry = bool(value & 0x01)
+                shifted = value >> 1
+            elif mnemonic == "ROL":
+                self._state.status.carry = bool(value & 0x80)
+                shifted = (value << 1) | carry_in
+            else:
+                self._state.status.carry = bool(value & 0x01)
+                shifted = (value >> 1) | (carry_in << 7)
+            value = shifted & 0xFF
+            if result.address is None:
+                self._state.a.value = value
+            else:
+                self._memory.write_byte(result.address, result.operand)
+                self._memory.write_byte(result.address, value)
+            self._update_nz(value)
         elif mnemonic in {"INC", "DEC"}:
             result = self.resolve_addressing(definition.addressing_mode)
             if result.address is None or result.operand is None:
