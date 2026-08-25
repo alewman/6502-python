@@ -726,10 +726,28 @@ class CPU:
         self._state.status.negative = bool(value & 0x80)
 
     def _execute_instruction(self, definition: OpcodeDefinition) -> int | None:
-        """Execute the implemented register and memory transfer families."""
+        """Execute implemented register, transfer, and logical families."""
         mnemonic = definition.mnemonic
         page_crossed = False
-        if mnemonic in {"LDA", "LDX", "LDY"}:
+        if mnemonic in {"ORA", "AND", "EOR", "BIT"}:
+            result = self.resolve_addressing(definition.addressing_mode)
+            page_crossed = result.page_crossed
+            if result.operand is None:
+                raise ValueError(f"{mnemonic} requires an operand")
+            operand = result.operand
+            if mnemonic == "BIT":
+                self._state.status.zero = (self._state.a.value & operand) == 0
+                self._state.status.negative = bool(operand & 0x80)
+                self._state.status.overflow = bool(operand & 0x40)
+            else:
+                value = {
+                    "ORA": self._state.a.value | operand,
+                    "AND": self._state.a.value & operand,
+                    "EOR": self._state.a.value ^ operand,
+                }[mnemonic]
+                self._state.a.value = value
+                self._update_nz(value)
+        elif mnemonic in {"LDA", "LDX", "LDY"}:
             result = self.resolve_addressing(definition.addressing_mode)
             page_crossed = result.page_crossed
             if result.operand is None:
