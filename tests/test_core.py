@@ -358,3 +358,82 @@ def test_cpu_rejects_wrong_optional_contract_objects():
         CPU(HostMemory(), lines=object())
     with pytest.raises(TypeError):
         CPU(HostMemory(), state=object())
+
+
+def test_indirect_wraps_jmp_pointer_high_byte_within_pointer_page():
+    memory = HostMemory()
+    memory.bytes.update(
+        {
+            0x0000: 0xFF,
+            0x0001: 0x12,
+            0x12FF: 0x34,
+            0x1200: 0x56,
+            0x5634: 0xA7,
+        }
+    )
+    cpu = CPU(memory)
+
+    result = cpu.resolve_addressing(AddressingMode.INDIRECT)
+
+    assert result == AddressingResult(AddressingMode.INDIRECT, 0x5634, 0xA7)
+    assert memory.operations == [
+        ("read", 0x0000),
+        ("read", 0x0001),
+        ("read", 0x12FF),
+        ("read", 0x1200),
+        ("read", 0x5634),
+    ]
+
+
+def test_indexed_indirect_wraps_pointer_reads_in_zero_page():
+    memory = HostMemory()
+    memory.bytes.update(
+        {
+            0x1000: 0xFF,
+            0x0000: 0x34,
+            0x0001: 0x12,
+            0x1234: 0xB8,
+        }
+    )
+    cpu = CPU(
+        memory,
+        state=CPUState(program_counter=0x1000, index=IndexRegisters(x=1)),
+    )
+
+    result = cpu.resolve_addressing(AddressingMode.INDEXED_INDIRECT)
+
+    assert result == AddressingResult(AddressingMode.INDEXED_INDIRECT, 0x1234, 0xB8)
+    assert memory.operations == [
+        ("read", 0x1000),
+        ("read", 0x0000),
+        ("read", 0x0001),
+        ("read", 0x1234),
+    ]
+
+
+def test_indirect_indexed_wraps_zero_page_pointer_and_reports_page_crossing():
+    memory = HostMemory()
+    memory.bytes.update(
+        {
+            0x1000: 0xFF,
+            0x00FF: 0xFF,
+            0x0000: 0x20,
+            0x2100: 0xC3,
+        }
+    )
+    cpu = CPU(
+        memory,
+        state=CPUState(program_counter=0x1000, index=IndexRegisters(y=1)),
+    )
+
+    result = cpu.resolve_addressing(AddressingMode.INDIRECT_INDEXED)
+
+    assert result == AddressingResult(
+        AddressingMode.INDIRECT_INDEXED, 0x2100, 0xC3, True
+    )
+    assert memory.operations == [
+        ("read", 0x1000),
+        ("read", 0x00FF),
+        ("read", 0x0000),
+        ("read", 0x2100),
+    ]

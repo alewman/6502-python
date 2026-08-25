@@ -44,6 +44,9 @@ class AddressingMode(StrEnum):
     ABSOLUTE = "absolute"
     ABSOLUTE_X = "absolute_x"
     ABSOLUTE_Y = "absolute_y"
+    INDIRECT = "indirect"
+    INDEXED_INDIRECT = "indexed_indirect"
+    INDIRECT_INDEXED = "indirect_indexed"
 
 
 @dataclass(frozen=True)
@@ -230,12 +233,24 @@ class CPU:
         address = _normalize_word_address(address)
         return self._validate_fetched_byte(self._memory.read_byte(address))
 
+    def _read_pointer(self, pointer: int, *, zero_page: bool = False) -> int:
+        """Read a little-endian pointer with NMOS wraparound behavior."""
+        if zero_page:
+            pointer = _normalize_byte_address(pointer)
+            high_address = _normalize_byte_address(pointer + 1)
+        else:
+            pointer = _normalize_word_address(pointer)
+            high_address = (pointer & 0xFF00) | ((pointer + 1) & 0x00FF)
+        low = self._read_operand(pointer)
+        high = self._read_operand(high_address)
+        return low | (high << 8)
+
     def resolve_addressing(self, mode: AddressingMode | str) -> AddressingResult:
         """Fetch and resolve one supported instruction addressing form.
 
         Memory forms read their operand, while accumulator and implied forms do
-        not access the bus. Indexed absolute forms report page crossing based on
-        the unindexed and indexed 16-bit addresses.
+        not access the bus. Indexed absolute and indirect-indexed forms report
+        page crossing based on the unindexed and indexed 16-bit addresses.
         """
         mode = self._coerce_addressing_mode(mode)
 
@@ -259,6 +274,25 @@ class CPU:
             base = self._fetch_byte()
             address = _normalize_byte_address(base + index)
             return AddressingResult(mode, address, self._read_operand(address))
+
+        if mode is AddressingMode.INDIRECT:
+            pointer = self._fetch_word()
+            address = self._read_pointer(pointer)
+            return AddressingResult(mode, address, self._read_operand(address))
+
+        if mode is AddressingMode.INDEXED_INDIRECT:
+            pointer = _normalize_byte_address(self._fetch_byte() + self._state.x.value)
+            address = self._read_pointer(pointer, zero_page=True)
+            return AddressingResult(mode, address, self._read_operand(address))
+
+        if mode is AddressingMode.INDIRECT_INDEXED:
+            pointer = self._fetch_byte()
+            base = self._read_pointer(pointer, zero_page=True)
+            address = _normalize_word_address(base + self._state.y.value)
+            page_crossed = (base & 0xFF00) != (address & 0xFF00)
+            return AddressingResult(
+                mode, address, self._read_operand(address), page_crossed
+            )
 
         if mode not in (
             AddressingMode.ABSOLUTE,
