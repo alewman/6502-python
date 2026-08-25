@@ -23,12 +23,25 @@ must not require network access or locally installed corpus files.
 
 ## Provenance and reproducibility
 
-The integration harness should record the identity of every external input when
-assets are introduced. At minimum, its report should identify the source,
-revision or release, acquisition date, and cryptographic hash of each downloaded
-archive, vector file, or executable. The exact source pins and binary hashes
-are intentionally left for the phase that introduces and reviews those assets;
-this skeleton does not invent them.
+The SingleStepTests 65x02 source pin is defined in
+`scripts/fetch_test_vectors.py`. That dependency-free configuration contains the
+repository URL, immutable commit, archive URL, expected `6502` source directory,
+and the archive checksum field (when the upstream source publishes one). Keep
+this file as the only source of the revision; do not copy the commit into this
+document or other scripts.
+
+Fetch the ignored corpus explicitly from the project root with:
+
+```console
+python scripts/fetch_test_vectors.py
+```
+
+The downloaded files belong under `tests/6502_test_vectors/6502/`; pytest must
+use only that local directory and must not download vectors. The upstream
+repository currently provides no archive checksum, so the fetch configuration
+leaves its optional checksum unset rather than inventing integrity metadata.
+For any external input added later, record its source, revision or release,
+acquisition date, and cryptographic hash when available.
 
 ## Opt-in execution
 
