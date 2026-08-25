@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 
 from .cpu import CPUState
 from .interrupts import InterruptBoundary, InterruptLines
@@ -29,6 +30,40 @@ def _normalize_word_address(address: int) -> int:
     if isinstance(address, bool) or not isinstance(address, int):
         raise TypeError("address must be an integer")
     return address & 0xFFFF
+
+
+class AddressingMode(StrEnum):
+    """Addressing forms resolved by the instruction dispatcher."""
+
+    ACCUMULATOR = "accumulator"
+    IMPLIED = "implied"
+    IMMEDIATE = "immediate"
+    ZERO_PAGE = "zero_page"
+    ZERO_PAGE_X = "zero_page_x"
+    ZERO_PAGE_Y = "zero_page_y"
+    ABSOLUTE = "absolute"
+    ABSOLUTE_X = "absolute_x"
+    ABSOLUTE_Y = "absolute_y"
+
+
+@dataclass(frozen=True)
+class AddressingResult:
+    """The operand information needed by an opcode handler."""
+
+    mode: AddressingMode
+    effective_address: int | None
+    operand: int | None
+    page_crossed: bool = False
+
+    @property
+    def address(self) -> int | None:
+        """Alias for the resolved effective address."""
+        return self.effective_address
+
+    @property
+    def value(self) -> int | None:
+        """Alias for the resolved operand value."""
+        return self.operand
 
 
 @dataclass(frozen=True)
@@ -176,6 +211,76 @@ class CPU:
         high = self._fetch_byte()
         return low | (high << 8)
 
+    @staticmethod
+    def _coerce_addressing_mode(mode: AddressingMode | str) -> AddressingMode:
+        if isinstance(mode, AddressingMode):
+            return mode
+        if isinstance(mode, str):
+            normalized = mode.strip().lower().replace("-", "_").replace(",", "_")
+            try:
+                return AddressingMode(normalized)
+            except ValueError:
+                try:
+                    return AddressingMode[normalized.upper()]
+                except KeyError:
+                    pass
+        raise ValueError(f"unsupported addressing mode: {mode!r}")
+
+    def _read_operand(self, address: int) -> int:
+        address = _normalize_word_address(address)
+        return self._validate_fetched_byte(self._memory.read_byte(address))
+
+    def resolve_addressing(self, mode: AddressingMode | str) -> AddressingResult:
+        """Fetch and resolve one supported instruction addressing form.
+
+        Memory forms read their operand, while accumulator and implied forms do
+        not access the bus. Indexed absolute forms report page crossing based on
+        the unindexed and indexed 16-bit addresses.
+        """
+        mode = self._coerce_addressing_mode(mode)
+
+        if mode is AddressingMode.ACCUMULATOR:
+            return AddressingResult(mode, None, self._state.a.value)
+        if mode is AddressingMode.IMPLIED:
+            return AddressingResult(mode, None, None)
+        if mode is AddressingMode.IMMEDIATE:
+            return AddressingResult(mode, None, self._fetch_byte())
+
+        if mode is AddressingMode.ZERO_PAGE:
+            address = self._fetch_byte()
+            return AddressingResult(mode, address, self._read_operand(address))
+
+        if mode in (AddressingMode.ZERO_PAGE_X, AddressingMode.ZERO_PAGE_Y):
+            index = (
+                self._state.x.value
+                if mode is AddressingMode.ZERO_PAGE_X
+                else self._state.y.value
+            )
+            base = self._fetch_byte()
+            address = _normalize_byte_address(base + index)
+            return AddressingResult(mode, address, self._read_operand(address))
+
+        if mode not in (
+            AddressingMode.ABSOLUTE,
+            AddressingMode.ABSOLUTE_X,
+            AddressingMode.ABSOLUTE_Y,
+        ):
+            raise ValueError(f"unsupported addressing mode: {mode!r}")
+
+        base = self._fetch_word()
+        if mode is AddressingMode.ABSOLUTE:
+            address = base
+            page_crossed = False
+        elif mode is AddressingMode.ABSOLUTE_X:
+            address = _normalize_word_address(base + self._state.x.value)
+            page_crossed = (base & 0xFF00) != (address & 0xFF00)
+        else:
+            address = _normalize_word_address(base + self._state.y.value)
+            page_crossed = (base & 0xFF00) != (address & 0xFF00)
+        return AddressingResult(
+            mode, address, self._read_operand(address), page_crossed
+        )
+
     def step(self, *, cycles: int = 0) -> InstructionStep:
         """Sample inputs and fetch one opcode for dispatch.
 
@@ -200,4 +305,10 @@ class CPU:
         )
 
 
-__all__ = ("CPU", "InstructionContext", "InstructionStep")
+__all__ = (
+    "AddressingMode",
+    "AddressingResult",
+    "CPU",
+    "InstructionContext",
+    "InstructionStep",
+)
