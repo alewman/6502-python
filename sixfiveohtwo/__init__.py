@@ -16,17 +16,23 @@ def __getattr__(name: str):
         "CPUState",
         "IndexRegister",
         "IndexRegisters",
+        "InterruptBoundary",
+        "InterruptLines",
         "ProgramCounter",
         "Register8",
         "Register16",
         "StackPointer",
         "StatusFlags",
     }:
-        cpu = _import_module(".cpu", __name__)
+        module_name = ".interrupts" if name in {
+            "InterruptBoundary",
+            "InterruptLines",
+        } else ".cpu"
+        module = _import_module(module_name, __name__)
         try:
-            return getattr(cpu, name)
+            return getattr(module, name)
         finally:
-            globals().pop("cpu", None)
+            globals().pop(module_name.removeprefix("."), None)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
