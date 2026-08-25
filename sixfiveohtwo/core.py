@@ -7,7 +7,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Mapping
 
-from .cpu import CPUState
+from .cpu import CPUState, pack_status_byte
 from .interrupts import InterruptBoundary, InterruptLines
 from .memory import MemoryBus
 
@@ -304,12 +304,44 @@ class ResetStep:
         return self.boundary.reset
 
 
+@dataclass(frozen=True)
+class InterruptStep:
+    """The result of accepting a hardware IRQ or NMI at a boundary."""
+
+    boundary: InterruptBoundary
+    vector: int
+    cycles: int
+    total_cycles: int
+
+    @property
+    def irq(self) -> bool:
+        """Whether this result accepted the maskable IRQ line."""
+        return isinstance(self, IRQStep)
+
+    @property
+    def nmi(self) -> bool:
+        """Whether this result accepted NMI."""
+        return isinstance(self, NMIStep)
+
+
+class IRQStep(InterruptStep):
+    """The result of accepting a maskable IRQ."""
+
+
+class NMIStep(InterruptStep):
+    """The result of accepting a non-maskable interrupt."""
+
+
+# Accept the conventional mixed-case spelling as well as the all-caps acronym.
+NmiStep = NMIStep
+
+
 class CPU:
     """Own CPU state while delegating memory and input lines to the host.
 
-    :meth:`step` prepares a dispatch context and rejects non-official opcodes;
-    instruction semantics and interrupt sequencing are added in later phases.
-    Hosts retain ownership of memory maps and devices.
+    :meth:`step` accepts boundary interrupts before preparing a dispatch context
+    and rejects non-official opcodes. Hosts retain ownership of memory maps and
+    devices.
     """
 
     __slots__ = ("_memory", "_state", "_lines")
@@ -612,17 +644,43 @@ class CPU:
             total_cycles=total_cycles,
         )
 
-    def step(self, *, cycles: int = 0) -> InstructionStep | ResetStep:
-        """Accept RESET or route one official opcode at an instruction boundary.
+    def _accept_interrupt(
+        self, boundary: InterruptBoundary, *, nmi: bool
+    ) -> InterruptStep:
+        """Perform the common seven-cycle IRQ/NMI stack and vector sequence."""
+        vector_address = 0xFFFA if nmi else 0xFFFE
+        result_type = NMIStep if nmi else IRQStep
 
-        RESET has priority over all instruction and maskable-interrupt work. Its
-        vector lifecycle consumes seven cycles; otherwise ``cycles`` records the
-        cycles supplied by the eventual instruction handler.
+        self._push_word(self._state.pc.value)
+        self._push_byte(pack_status_byte(self._state.status, break_flag=False))
+        self._state.status.interrupt_disable = True
+        low = self._read_operand(vector_address)
+        high = self._read_operand(vector_address + 1)
+        vector = low | (high << 8)
+        self._state.pc.value = vector
+        total_cycles = self.record_cycles(7)
+        return result_type(
+            boundary=boundary,
+            vector=vector,
+            cycles=7,
+            total_cycles=total_cycles,
+        )
+
+    def step(self, *, cycles: int = 0) -> InstructionStep | ResetStep | InterruptStep:
+        """Accept RESET, IRQ, or NMI before routing an opcode at a boundary.
+
+        RESET has priority, followed by NMI and then an unmasked IRQ. Hardware
+        interrupt vector lifecycles consume seven cycles; otherwise ``cycles``
+        records the cycles supplied by the eventual instruction handler.
         """
         cycles = _require_cycles(cycles)
         boundary = self.sample_instruction_boundary()
         if boundary.reset:
             return self._accept_reset(boundary)
+        if boundary.nmi:
+            return self._accept_interrupt(boundary, nmi=True)
+        if boundary.irq and not self._state.status.interrupt_disable:
+            return self._accept_interrupt(boundary, nmi=False)
         opcode_address = _normalize_word_address(self._state.pc.value)
         opcode = self._fetch_byte()
         self.dispatch_opcode(opcode)
@@ -645,6 +703,10 @@ __all__ = (
     "CPU",
     "InstructionContext",
     "InstructionStep",
+    "InterruptStep",
+    "IRQStep",
+    "NMIStep",
+    "NmiStep",
     "OFFICIAL_OPCODES",
     "ResetStep",
     "OpcodeDefinition",
