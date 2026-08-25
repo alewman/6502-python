@@ -28,6 +28,8 @@ def __getattr__(name: str):
         "Register16",
         "StackPointer",
         "StatusFlags",
+        "pack_status_byte",
+        "unpack_status_byte",
     }:
         if name in {
             "CPU",

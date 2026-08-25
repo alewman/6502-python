@@ -10,6 +10,8 @@ from sixfiveohtwo import (
     Register16,
     StackPointer,
     StatusFlags,
+    pack_status_byte,
+    unpack_status_byte,
 )
 
 
@@ -127,3 +129,19 @@ def test_break_flag_is_only_set_for_requested_status_serialization_context():
 
     with pytest.raises(TypeError):
         flags.to_byte(break_flag=1)
+
+
+def test_central_status_helpers_synthesize_context_bit_and_normalize_observed_bytes():
+    flags = StatusFlags(negative=True, decimal=True, carry=True)
+
+    assert pack_status_byte(flags, break_flag=True) == 0xB9
+    assert pack_status_byte(flags, break_flag=False) == 0xA9
+    assert unpack_status_byte(0xFF) == StatusFlags(
+        negative=True,
+        overflow=True,
+        decimal=True,
+        interrupt_disable=True,
+        zero=True,
+        carry=True,
+    )
+    assert unpack_status_byte(0x00).to_byte() == 0x20
