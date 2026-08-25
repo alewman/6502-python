@@ -93,7 +93,10 @@ At an instruction boundary, `CPU.step()` accepts RESET first, then pending NMI,
 then an asserted IRQ when the interrupt-disable flag is clear. IRQ and NMI push
 PC and status (with B clear), set I, fetch their vectors, and account for seven
 cycles. A masked IRQ remains asserted and is deferred until interrupts are
-enabled.
+enabled. During a BRK sequence, an NMI sampled before vector fetch has priority
+for that vector: BRK still pushes its post-padding PC and B-set status, but the
+NMI vector is selected. The sequence remains seven cycles and reports its
+accepted event order as `("BRK", "NMI")`.
 
 ## v1 scope and exclusions
 
