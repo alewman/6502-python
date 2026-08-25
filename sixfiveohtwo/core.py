@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from types import MappingProxyType
+from typing import Mapping
 
 from .cpu import CPUState
 from .interrupts import InterruptBoundary, InterruptLines
@@ -59,6 +61,176 @@ class AddressingMode(StrEnum):
     INDIRECT_INDEXED = "indirect_indexed"
 
 
+class UnsupportedOpcodeError(ValueError):
+    """Raised when an opcode is not part of the documented NMOS 6502 set."""
+
+
+@dataclass(frozen=True)
+class OpcodeDefinition:
+    """Metadata used to route an official opcode to its future handler."""
+
+    opcode: int
+    mnemonic: str
+    addressing_mode: AddressingMode
+    cycles: int
+
+
+# The catalog deliberately contains metadata only. Instruction semantics are added
+# by later phases without changing boundary fetch or addressing dispatch.
+_OPCODE_ROWS = (
+    (
+        "69 65 75 6D 7D 79 61 71",
+        "ADC",
+        "IMMEDIATE ZERO_PAGE ZERO_PAGE_X ABSOLUTE ABSOLUTE_X ABSOLUTE_Y "
+        "INDEXED_INDIRECT INDIRECT_INDEXED",
+        "2 3 4 4 4 4 6 5",
+    ),
+    (
+        "29 25 35 2D 3D 39 21 31",
+        "AND",
+        "IMMEDIATE ZERO_PAGE ZERO_PAGE_X ABSOLUTE ABSOLUTE_X ABSOLUTE_Y "
+        "INDEXED_INDIRECT INDIRECT_INDEXED",
+        "2 3 4 4 4 4 6 5",
+    ),
+    (
+        "0A 06 16 0E 1E",
+        "ASL",
+        "ACCUMULATOR ZERO_PAGE ZERO_PAGE_X ABSOLUTE ABSOLUTE_X",
+        "2 5 6 6 7",
+    ),
+    ("00", "BRK", "IMPLIED", "7"),
+    ("90", "BCC", "RELATIVE", "2"),
+    ("B0", "BCS", "RELATIVE", "2"),
+    ("F0", "BEQ", "RELATIVE", "2"),
+    ("30", "BMI", "RELATIVE", "2"),
+    ("D0", "BNE", "RELATIVE", "2"),
+    ("10", "BPL", "RELATIVE", "2"),
+    ("50", "BVC", "RELATIVE", "2"),
+    ("70", "BVS", "RELATIVE", "2"),
+    ("24 2C", "BIT", "ZERO_PAGE ABSOLUTE", "3 4"),
+    ("18", "CLC", "IMPLIED", "2"),
+    ("D8", "CLD", "IMPLIED", "2"),
+    ("58", "CLI", "IMPLIED", "2"),
+    ("B8", "CLV", "IMPLIED", "2"),
+    ("38", "SEC", "IMPLIED", "2"),
+    ("F8", "SED", "IMPLIED", "2"),
+    ("78", "SEI", "IMPLIED", "2"),
+    (
+        "C9 C5 D5 CD DD D9 C1 D1",
+        "CMP",
+        "IMMEDIATE ZERO_PAGE ZERO_PAGE_X ABSOLUTE ABSOLUTE_X ABSOLUTE_Y "
+        "INDEXED_INDIRECT INDIRECT_INDEXED",
+        "2 3 4 4 4 4 6 5",
+    ),
+    ("E0 E4 EC", "CPX", "IMMEDIATE ZERO_PAGE ABSOLUTE", "2 3 4"),
+    ("C0 C4 CC", "CPY", "IMMEDIATE ZERO_PAGE ABSOLUTE", "2 3 4"),
+    ("C6 D6 CE DE", "DEC", "ZERO_PAGE ZERO_PAGE_X ABSOLUTE ABSOLUTE_X", "5 6 6 7"),
+    ("CA", "DEX", "IMPLIED", "2"),
+    ("88", "DEY", "IMPLIED", "2"),
+    (
+        "49 45 55 4D 5D 59 41 51",
+        "EOR",
+        "IMMEDIATE ZERO_PAGE ZERO_PAGE_X ABSOLUTE ABSOLUTE_X ABSOLUTE_Y "
+        "INDEXED_INDIRECT INDIRECT_INDEXED",
+        "2 3 4 4 4 4 6 5",
+    ),
+    ("E6 F6 EE FE", "INC", "ZERO_PAGE ZERO_PAGE_X ABSOLUTE ABSOLUTE_X", "5 6 6 7"),
+    ("E8", "INX", "IMPLIED", "2"),
+    ("C8", "INY", "IMPLIED", "2"),
+    ("4C 6C", "JMP", "ABSOLUTE INDIRECT", "3 5"),
+    ("20", "JSR", "ABSOLUTE", "6"),
+    (
+        "A9 A5 B5 AD BD B9 A1 B1",
+        "LDA",
+        "IMMEDIATE ZERO_PAGE ZERO_PAGE_X ABSOLUTE ABSOLUTE_X ABSOLUTE_Y "
+        "INDEXED_INDIRECT INDIRECT_INDEXED",
+        "2 3 4 4 4 4 6 5",
+    ),
+    (
+        "A2 A6 B6 AE BE",
+        "LDX",
+        "IMMEDIATE ZERO_PAGE ZERO_PAGE_Y ABSOLUTE ABSOLUTE_Y",
+        "2 3 4 4 4",
+    ),
+    (
+        "A0 A4 B4 AC BC",
+        "LDY",
+        "IMMEDIATE ZERO_PAGE ZERO_PAGE_X ABSOLUTE ABSOLUTE_X",
+        "2 3 4 4 4",
+    ),
+    (
+        "4A 46 56 4E 5E",
+        "LSR",
+        "ACCUMULATOR ZERO_PAGE ZERO_PAGE_X ABSOLUTE ABSOLUTE_X",
+        "2 5 6 6 7",
+    ),
+    ("EA", "NOP", "IMPLIED", "2"),
+    (
+        "09 05 15 0D 1D 19 01 11",
+        "ORA",
+        "IMMEDIATE ZERO_PAGE ZERO_PAGE_X ABSOLUTE ABSOLUTE_X ABSOLUTE_Y "
+        "INDEXED_INDIRECT INDIRECT_INDEXED",
+        "2 3 4 4 4 4 6 5",
+    ),
+    ("48", "PHA", "IMPLIED", "3"),
+    ("08", "PHP", "IMPLIED", "3"),
+    ("68", "PLA", "IMPLIED", "4"),
+    ("28", "PLP", "IMPLIED", "4"),
+    (
+        "2A 26 36 2E 3E",
+        "ROL",
+        "ACCUMULATOR ZERO_PAGE ZERO_PAGE_X ABSOLUTE ABSOLUTE_X",
+        "2 5 6 6 7",
+    ),
+    (
+        "6A 66 76 6E 7E",
+        "ROR",
+        "ACCUMULATOR ZERO_PAGE ZERO_PAGE_X ABSOLUTE ABSOLUTE_X",
+        "2 5 6 6 7",
+    ),
+    ("40", "RTI", "IMPLIED", "6"),
+    ("60", "RTS", "IMPLIED", "6"),
+    (
+        "E9 E5 F5 ED FD F9 E1 F1",
+        "SBC",
+        "IMMEDIATE ZERO_PAGE ZERO_PAGE_X ABSOLUTE ABSOLUTE_X ABSOLUTE_Y "
+        "INDEXED_INDIRECT INDIRECT_INDEXED",
+        "2 3 4 4 4 4 6 5",
+    ),
+    (
+        "85 95 8D 9D 99 81 91",
+        "STA",
+        "ZERO_PAGE ZERO_PAGE_X ABSOLUTE ABSOLUTE_X ABSOLUTE_Y "
+        "INDEXED_INDIRECT INDIRECT_INDEXED",
+        "3 4 4 5 5 6 6",
+    ),
+    ("86 96 8E", "STX", "ZERO_PAGE ZERO_PAGE_Y ABSOLUTE", "3 4 4"),
+    ("84 94 8C", "STY", "ZERO_PAGE ZERO_PAGE_X ABSOLUTE", "3 4 4"),
+    ("AA", "TAX", "IMPLIED", "2"),
+    ("A8", "TAY", "IMPLIED", "2"),
+    ("BA", "TSX", "IMPLIED", "2"),
+    ("8A", "TXA", "IMPLIED", "2"),
+    ("9A", "TXS", "IMPLIED", "2"),
+    ("98", "TYA", "IMPLIED", "2"),
+)
+
+
+def _build_opcode_catalog() -> Mapping[int, OpcodeDefinition]:
+    catalog: dict[int, OpcodeDefinition] = {}
+    for opcodes, mnemonic, modes, cycles in _OPCODE_ROWS:
+        for opcode, mode, cycle in zip(
+            (int(value, 16) for value in opcodes.split()),
+            (AddressingMode[value] for value in modes.split()),
+            (int(value) for value in cycles.split()),
+            strict=True,
+        ):
+            catalog[opcode] = OpcodeDefinition(opcode, mnemonic, mode, cycle)
+    return MappingProxyType(catalog)
+
+
+OFFICIAL_OPCODES = _build_opcode_catalog()
+
+
 @dataclass(frozen=True)
 class AddressingResult:
     """The operand information needed by an opcode handler."""
@@ -111,13 +283,18 @@ class InstructionStep:
     def boundary(self) -> InterruptBoundary:
         return self.context.boundary
 
+    @property
+    def definition(self) -> OpcodeDefinition:
+        """The official routing metadata selected for this step."""
+        return CPU.dispatch_opcode(self.opcode)
+
 
 class CPU:
     """Own CPU state while delegating memory and input lines to the host.
 
-    :meth:`step` prepares a dispatch context but does not implement instruction
-    semantics or interrupt sequencing. Hosts retain ownership of memory maps and
-    devices.
+    :meth:`step` prepares a dispatch context and rejects non-official opcodes;
+    instruction semantics and interrupt sequencing are added in later phases.
+    Hosts retain ownership of memory maps and devices.
     """
 
     __slots__ = ("_memory", "_state", "_lines")
@@ -346,17 +523,36 @@ class CPU:
             mode, address, self._read_operand(address), page_crossed
         )
 
-    def step(self, *, cycles: int = 0) -> InstructionStep:
-        """Sample inputs and fetch one opcode for dispatch.
+    @staticmethod
+    def dispatch_opcode(opcode: int) -> OpcodeDefinition:
+        """Return the official routing metadata for one opcode byte.
 
-        The opcode is fetched at the current PC, then PC wraps as a 16-bit
-        register. ``cycles`` lets a dispatcher account for the completed
-        context in the returned result; instruction semantics are not performed.
+        This is intentionally a metadata-only dispatch point. A later phase can
+        attach instruction handlers while retaining this explicit illegal-opcode
+        boundary.
+        """
+        if isinstance(opcode, bool) or not isinstance(opcode, int):
+            raise TypeError("opcode must be an integer byte")
+        if not 0x00 <= opcode <= 0xFF:
+            raise ValueError("opcode must fit in 8 bits")
+        try:
+            return OFFICIAL_OPCODES[opcode]
+        except KeyError as exc:
+            raise UnsupportedOpcodeError(
+                f"unsupported or unofficial opcode: 0x{opcode:02X}"
+            ) from exc
+
+    def step(self, *, cycles: int = 0) -> InstructionStep:
+        """Sample inputs, fetch, and route one official opcode.
+
+        Operand bytes are left for the future instruction handler; this boundary
+        step therefore performs no instruction semantics or operand fetches.
         """
         cycles = _require_cycles(cycles)
         boundary = self.sample_instruction_boundary()
         opcode_address = _normalize_word_address(self._state.pc.value)
         opcode = self._fetch_byte()
+        self.dispatch_opcode(opcode)
         total_cycles = self.record_cycles(cycles)
         return InstructionStep(
             context=InstructionContext(
@@ -376,4 +572,7 @@ __all__ = (
     "CPU",
     "InstructionContext",
     "InstructionStep",
+    "OFFICIAL_OPCODES",
+    "OpcodeDefinition",
+    "UnsupportedOpcodeError",
 )
