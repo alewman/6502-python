@@ -55,6 +55,17 @@ class HostDeviceMemory(HostMemory):
         super().write_byte(address, value)
 
 
+class NmiOnBrkStatusWriteMemory(HostMemory):
+    def __init__(self):
+        super().__init__()
+        self.lines = None
+
+    def write_byte(self, address: int, value: int) -> None:
+        super().write_byte(address, value)
+        if address == 0x01FB:
+            self.lines.set_nmi(True)
+
+
 @pytest.mark.parametrize(
     ("normalizer", "value", "expected"),
     [
@@ -426,6 +437,72 @@ def test_php_pushes_break_context_and_plp_restores_only_persistent_flags():
     assert plp.cycles == 4
     assert state.sp.value == 0xFD
     assert state.status == StatusFlags(overflow=True, interrupt_disable=True, zero=True)
+
+
+def test_nmi_asserted_during_brk_hijacks_vector_without_changing_brk_frame():
+    memory = NmiOnBrkStatusWriteMemory()
+    memory.lines = InterruptLines()
+    memory.bytes.update(
+        {
+            0x2000: 0x00,
+            0x2001: 0xEA,
+            0xFFFE: 0x34,
+            0xFFFF: 0x12,
+            0xFFFA: 0x78,
+            0xFFFB: 0x56,
+        }
+    )
+    state = CPUState(
+        program_counter=0x2000,
+        stack_pointer=0xFD,
+        status=StatusFlags(carry=True),
+    )
+    cpu = CPU(memory, lines=memory.lines, state=state)
+
+    result = cpu.step(cycles=99)
+
+    assert result.vector == 0x5678
+    assert result.accepted_events == ("BRK", "NMI")
+    assert result.cycles == 7
+    assert result.total_cycles == 7
+    assert state.pc.value == 0x5678
+    assert state.sp.value == 0xFA
+    assert memory.bytes[0x01FD] == 0x20
+    assert memory.bytes[0x01FC] == 0x02
+    assert memory.bytes[0x01FB] == 0x31
+    assert memory.operations[-2:] == [("read", 0xFFFA), ("read", 0xFFFB)]
+
+
+def test_irq_held_during_nmi_is_accepted_after_rti_in_event_order():
+    memory = HostMemory()
+    memory.bytes.update(
+        {
+            0xFFFA: 0x00,
+            0xFFFB: 0x80,
+            0xFFFE: 0x00,
+            0xFFFF: 0x90,
+            0x8000: 0x40,
+        }
+    )
+    state = CPUState(program_counter=0x2345, stack_pointer=0xFD)
+    cpu = CPU(memory, state=state)
+    cpu.set_irq(True)
+    cpu.signal_nmi()
+
+    nmi = cpu.step()
+    rti = cpu.step()
+    irq = cpu.step()
+
+    assert isinstance(nmi, NMIStep)
+    assert nmi.boundary == InterruptBoundary(reset=False, irq=True, nmi=True)
+    assert nmi.accepted_events == ("NMI",)
+    assert nmi.cycles == 7
+    assert rti.cycles == 6
+    assert isinstance(irq, IRQStep)
+    assert irq.accepted_events == ("IRQ",)
+    assert irq.vector == 0x9000
+    assert irq.cycles == 7
+    assert state.cycles == 20
 
 
 def test_nmi_has_priority_over_irq_and_masked_irq_remains_deferred():
