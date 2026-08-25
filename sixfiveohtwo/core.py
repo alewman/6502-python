@@ -289,6 +289,21 @@ class InstructionStep:
         return CPU.dispatch_opcode(self.opcode)
 
 
+@dataclass(frozen=True)
+class ResetStep:
+    """The result of accepting RESET at an instruction boundary."""
+
+    boundary: InterruptBoundary
+    vector: int
+    cycles: int
+    total_cycles: int
+
+    @property
+    def reset(self) -> bool:
+        """Whether this lifecycle result represents RESET acceptance."""
+        return self.boundary.reset
+
+
 class CPU:
     """Own CPU state while delegating memory and input lines to the host.
 
@@ -582,14 +597,32 @@ class CPU:
                 f"unsupported or unofficial opcode: 0x{opcode:02X}"
             ) from exc
 
-    def step(self, *, cycles: int = 0) -> InstructionStep:
-        """Sample inputs, fetch, and route one official opcode.
+    def _accept_reset(self, boundary: InterruptBoundary) -> ResetStep:
+        """Load the reset vector and apply RESET's persistent flag effect."""
+        low = self._read_operand(0xFFFC)
+        high = self._read_operand(0xFFFD)
+        vector = low | (high << 8)
+        self._state.pc.value = vector
+        self._state.status.interrupt_disable = True
+        total_cycles = self.record_cycles(7)
+        return ResetStep(
+            boundary=boundary,
+            vector=vector,
+            cycles=7,
+            total_cycles=total_cycles,
+        )
 
-        Operand bytes are left for the future instruction handler; this boundary
-        step therefore performs no instruction semantics or operand fetches.
+    def step(self, *, cycles: int = 0) -> InstructionStep | ResetStep:
+        """Accept RESET or route one official opcode at an instruction boundary.
+
+        RESET has priority over all instruction and maskable-interrupt work. Its
+        vector lifecycle consumes seven cycles; otherwise ``cycles`` records the
+        cycles supplied by the eventual instruction handler.
         """
         cycles = _require_cycles(cycles)
         boundary = self.sample_instruction_boundary()
+        if boundary.reset:
+            return self._accept_reset(boundary)
         opcode_address = _normalize_word_address(self._state.pc.value)
         opcode = self._fetch_byte()
         self.dispatch_opcode(opcode)
@@ -613,6 +646,7 @@ __all__ = (
     "InstructionContext",
     "InstructionStep",
     "OFFICIAL_OPCODES",
+    "ResetStep",
     "OpcodeDefinition",
     "UnsupportedOpcodeError",
 )
