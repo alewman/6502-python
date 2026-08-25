@@ -170,18 +170,22 @@ class StatusFlags:
 
 @dataclass
 class CPUState:
-    """Complete register state for an NMOS 6502 core."""
+    """Complete register state for an NMOS 6502 core.
+
+    ``cycles`` is host-visible execution accounting. It is deliberately separate
+    from register state transitions: a dispatcher records the cycles consumed by
+    the context returned from a boundary step.
+    """
 
     accumulator: Accumulator = field(default_factory=Accumulator)
     index: IndexRegisters = field(default_factory=IndexRegisters)
     program_counter: ProgramCounter = field(default_factory=ProgramCounter)
     stack_pointer: StackPointer = field(default_factory=lambda: StackPointer(0xFD))
     status: StatusFlags = field(default_factory=StatusFlags)
+    cycles: int = 0
 
     def __post_init__(self) -> None:
-        if isinstance(self.accumulator, int) and not isinstance(
-            self.accumulator, bool
-        ):
+        if isinstance(self.accumulator, int) and not isinstance(self.accumulator, bool):
             self.accumulator = Accumulator(self.accumulator)
         if isinstance(self.program_counter, int) and not isinstance(
             self.program_counter, bool
@@ -201,6 +205,10 @@ class CPUState:
             raise TypeError("stack_pointer must be a stack pointer or integer")
         if not isinstance(self.status, StatusFlags):
             raise TypeError("status must be status flags")
+        if isinstance(self.cycles, bool) or not isinstance(self.cycles, int):
+            raise TypeError("cycles must be an integer")
+        if self.cycles < 0:
+            raise ValueError("cycles must not be negative")
 
     @property
     def a(self) -> Accumulator:
