@@ -32,6 +32,15 @@ def _normalize_word_address(address: int) -> int:
     return address & 0xFFFF
 
 
+def _decode_relative_offset(value: int) -> int:
+    """Decode an unsigned instruction byte as a signed 8-bit offset."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("relative offset must be an integer byte")
+    if not 0x00 <= value <= 0xFF:
+        raise ValueError("relative offset must fit in 8 bits")
+    return value - 0x100 if value & 0x80 else value
+
+
 class AddressingMode(StrEnum):
     """Addressing forms resolved by the instruction dispatcher."""
 
@@ -45,6 +54,7 @@ class AddressingMode(StrEnum):
     ABSOLUTE_X = "absolute_x"
     ABSOLUTE_Y = "absolute_y"
     INDIRECT = "indirect"
+    RELATIVE = "relative"
     INDEXED_INDIRECT = "indexed_indirect"
     INDIRECT_INDEXED = "indirect_indexed"
 
@@ -57,6 +67,7 @@ class AddressingResult:
     effective_address: int | None
     operand: int | None
     page_crossed: bool = False
+    sequential_pc: int | None = None
 
     @property
     def address(self) -> int | None:
@@ -245,6 +256,24 @@ class CPU:
         high = self._read_operand(high_address)
         return low | (high << 8)
 
+    def resolve_relative_address(self) -> AddressingResult:
+        """Resolve a relative branch operand from the instruction stream.
+
+        The operand is returned as a signed offset. The sequential PC is retained
+        separately because branch timing compares it with the taken target.
+        """
+        offset = _decode_relative_offset(self._fetch_byte())
+        sequential_pc = _normalize_word_address(self._state.pc.value)
+        target = _normalize_word_address(sequential_pc + offset)
+        page_crossed = (sequential_pc & 0xFF00) != (target & 0xFF00)
+        return AddressingResult(
+            AddressingMode.RELATIVE,
+            target,
+            offset,
+            page_crossed,
+            sequential_pc,
+        )
+
     def resolve_addressing(self, mode: AddressingMode | str) -> AddressingResult:
         """Fetch and resolve one supported instruction addressing form.
 
@@ -260,6 +289,8 @@ class CPU:
             return AddressingResult(mode, None, None)
         if mode is AddressingMode.IMMEDIATE:
             return AddressingResult(mode, None, self._fetch_byte())
+        if mode is AddressingMode.RELATIVE:
+            return self.resolve_relative_address()
 
         if mode is AddressingMode.ZERO_PAGE:
             address = self._fetch_byte()
