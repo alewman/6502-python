@@ -78,6 +78,19 @@ def test_cpu_state_coerces_integer_register_values_to_typed_registers():
     assert state.sp.value == 0xAB
 
 
+def test_cpu_state_cycle_accounting_defaults_and_accepts_nonnegative_totals():
+    state = CPUState(cycles=7)
+
+    assert state.cycles == 7
+    state.cycles += 3
+    assert state.cycles == 10
+
+    with pytest.raises(TypeError):
+        CPUState(cycles=True)
+    with pytest.raises(ValueError):
+        CPUState(cycles=-1)
+
+
 def test_status_flags_serialize_all_physical_flags_with_unused_bit_set():
     flags = StatusFlags(
         negative=True,
