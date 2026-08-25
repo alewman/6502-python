@@ -95,7 +95,11 @@ class InterruptLines:
         )
 
     def sample_instruction_boundary(self) -> InterruptBoundary:
-        """Return line state for a boundary and consume the pending NMI edge."""
+        """Return and consume the pending line state at a boundary.
+
+        The core may sample this contract again at an NMOS interrupt-sequence
+        boundary, such as immediately before BRK vector fetch.
+        """
         sample = self.pending_interrupt_boundary()
         self._nmi_pending = False
         return sample

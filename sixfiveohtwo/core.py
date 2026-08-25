@@ -274,6 +274,8 @@ class InstructionStep:
     context: InstructionContext
     cycles: int
     total_cycles: int
+    vector: int | None = None
+    accepted_events: tuple[str, ...] = ()
 
     @property
     def opcode(self) -> int:
@@ -297,6 +299,7 @@ class ResetStep:
     vector: int
     cycles: int
     total_cycles: int
+    accepted_events: tuple[str, ...] = ("RESET",)
 
     @property
     def reset(self) -> bool:
@@ -312,6 +315,7 @@ class InterruptStep:
     vector: int
     cycles: int
     total_cycles: int
+    accepted_events: tuple[str, ...] = ()
 
     @property
     def irq(self) -> bool:
@@ -673,26 +677,32 @@ class CPU:
             vector=vector,
             cycles=7,
             total_cycles=total_cycles,
+            accepted_events=("NMI",) if nmi else ("IRQ",),
         )
 
-    def _execute_lifecycle(self, mnemonic: str) -> int | None:
+    def _execute_lifecycle(
+        self, mnemonic: str
+    ) -> tuple[int, int | None, tuple[str, ...]] | None:
         if mnemonic == "BRK":
             self._fetch_byte()
             self._push_word(self._state.pc.value)
             self._push_status(break_flag=True)
             self._state.status.interrupt_disable = True
-            self._state.pc.value = self._read_vector(0xFFFE)
-            return 7
+            sequence_boundary = self.sample_instruction_boundary()
+            vector_address = 0xFFFA if sequence_boundary.nmi else 0xFFFE
+            self._state.pc.value = self._read_vector(vector_address)
+            accepted_events = ("BRK", "NMI") if sequence_boundary.nmi else ("BRK",)
+            return 7, self._state.pc.value, accepted_events
         if mnemonic == "RTI":
             self._pop_status()
             self._state.pc.value = self._pop_word()
-            return 6
+            return 6, None, ()
         if mnemonic == "PHP":
             self._push_status(break_flag=True)
-            return 3
+            return 3, None, ()
         if mnemonic == "PLP":
             self._pop_status()
-            return 4
+            return 4, None, ()
         return None
 
     def step(self, *, cycles: int = 0) -> InstructionStep | ResetStep | InterruptStep:
@@ -713,8 +723,13 @@ class CPU:
         opcode_address = _normalize_word_address(self._state.pc.value)
         opcode = self._fetch_byte()
         definition = self.dispatch_opcode(opcode)
-        lifecycle_cycles = self._execute_lifecycle(definition.mnemonic)
-        executed_cycles = lifecycle_cycles if lifecycle_cycles is not None else cycles
+        lifecycle = self._execute_lifecycle(definition.mnemonic)
+        if lifecycle is None:
+            executed_cycles = cycles
+            vector = None
+            accepted_events = ()
+        else:
+            executed_cycles, vector, accepted_events = lifecycle
         total_cycles = self.record_cycles(executed_cycles)
         return InstructionStep(
             context=InstructionContext(
@@ -725,6 +740,8 @@ class CPU:
             ),
             cycles=executed_cycles,
             total_cycles=total_cycles,
+            vector=vector,
+            accepted_events=accepted_events,
         )
 
 
