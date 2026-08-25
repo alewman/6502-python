@@ -16,10 +16,10 @@ def test_package_imports_on_supported_python():
 @pytest.mark.skipif(
     sys.version_info < (3, 12), reason="sixfiveohtwo requires Python 3.12+"
 )
-def test_package_exposes_only_initial_public_symbols():
+def test_package_exposes_memory_bus():
     package = importlib.import_module("sixfiveohtwo")
 
     public_symbols = {name for name in vars(package) if not name.startswith("_")}
 
-    assert package.__all__ == ()
-    assert public_symbols == set()
+    assert package.__all__ == ("MemoryBus",)
+    assert public_symbols == {"MemoryBus", "memory"}
