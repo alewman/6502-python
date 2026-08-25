@@ -357,6 +357,77 @@ def test_irq_pushes_pc_and_status_clears_break_sets_i_and_loads_irq_vector():
     assert memory.operations[-2:] == [("read", 0xFFFE), ("read", 0xFFFF)]
 
 
+def test_brk_consumes_padding_pushes_post_padding_pc_and_vectors_in_seven_cycles():
+    memory = HostMemory()
+    memory.bytes.update({0x2000: 0x00, 0x2001: 0xEA, 0xFFFE: 0x34, 0xFFFF: 0x12})
+    state = CPUState(
+        program_counter=0x2000,
+        stack_pointer=0xFD,
+        status=StatusFlags(decimal=True, carry=True),
+    )
+    cpu = CPU(memory, state=state)
+
+    result = cpu.step(cycles=99)
+
+    assert result.cycles == 7
+    assert result.total_cycles == 7
+    assert state.pc.value == 0x1234
+    assert state.sp.value == 0xFA
+    assert state.status.interrupt_disable is True
+    assert memory.bytes[0x01FD] == 0x20
+    assert memory.bytes[0x01FC] == 0x02
+    assert memory.bytes[0x01FB] == 0x39
+    assert memory.operations == [
+        ("read", 0x2000),
+        ("read", 0x2001),
+        ("write", 0x01FD, 0x20),
+        ("write", 0x01FC, 0x02),
+        ("write", 0x01FB, 0x39),
+        ("read", 0xFFFE),
+        ("read", 0xFFFF),
+    ]
+
+
+def test_rti_restores_status_and_pc_without_persisting_break_flag():
+    memory = HostMemory()
+    memory.bytes.update({0x4000: 0x40, 0x01FB: 0xA9, 0x01FC: 0x78, 0x01FD: 0x56})
+    state = CPUState(program_counter=0x4000, stack_pointer=0xFA)
+    cpu = CPU(memory, state=state)
+
+    result = cpu.step(cycles=99)
+
+    assert result.cycles == 6
+    assert result.total_cycles == 6
+    assert state.pc.value == 0x5678
+    assert state.sp.value == 0xFD
+    assert state.status == StatusFlags(
+        negative=True, decimal=True, interrupt_disable=False, carry=True
+    )
+    assert state.status.to_byte(break_flag=True) == 0xB9
+
+
+def test_php_pushes_break_context_and_plp_restores_only_persistent_flags():
+    memory = HostMemory()
+    memory.bytes.update({0x5000: 0x08, 0x5001: 0x28, 0x01FD: 0x00})
+    state = CPUState(
+        program_counter=0x5000,
+        stack_pointer=0xFD,
+        status=StatusFlags(overflow=True, interrupt_disable=True, zero=True),
+    )
+    cpu = CPU(memory, state=state)
+
+    php = cpu.step()
+    assert php.cycles == 3
+    assert state.sp.value == 0xFC
+    assert memory.bytes[0x01FD] == 0x76
+
+    state.status = StatusFlags(carry=True)
+    plp = cpu.step()
+    assert plp.cycles == 4
+    assert state.sp.value == 0xFD
+    assert state.status == StatusFlags(overflow=True, interrupt_disable=True, zero=True)
+
+
 def test_nmi_has_priority_over_irq_and_masked_irq_remains_deferred():
     memory = HostMemory()
     memory.bytes.update({0xFFFA: 0x00, 0xFFFB: 0x80, 0x0000: 0xEA})

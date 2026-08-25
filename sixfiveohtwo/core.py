@@ -7,7 +7,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Mapping
 
-from .cpu import CPUState, pack_status_byte
+from .cpu import CPUState, pack_status_byte, unpack_status_byte
 from .interrupts import InterruptBoundary, InterruptLines
 from .memory import MemoryBus
 
@@ -644,6 +644,17 @@ class CPU:
             total_cycles=total_cycles,
         )
 
+    def _push_status(self, *, break_flag: bool) -> None:
+        self._push_byte(pack_status_byte(self._state.status, break_flag=break_flag))
+
+    def _pop_status(self) -> None:
+        self._state.status = unpack_status_byte(self._pop_byte())
+
+    def _read_vector(self, address: int) -> int:
+        low = self._read_operand(address)
+        high = self._read_operand(address + 1)
+        return low | (high << 8)
+
     def _accept_interrupt(
         self, boundary: InterruptBoundary, *, nmi: bool
     ) -> InterruptStep:
@@ -652,11 +663,9 @@ class CPU:
         result_type = NMIStep if nmi else IRQStep
 
         self._push_word(self._state.pc.value)
-        self._push_byte(pack_status_byte(self._state.status, break_flag=False))
+        self._push_status(break_flag=False)
         self._state.status.interrupt_disable = True
-        low = self._read_operand(vector_address)
-        high = self._read_operand(vector_address + 1)
-        vector = low | (high << 8)
+        vector = self._read_vector(vector_address)
         self._state.pc.value = vector
         total_cycles = self.record_cycles(7)
         return result_type(
@@ -665,6 +674,26 @@ class CPU:
             cycles=7,
             total_cycles=total_cycles,
         )
+
+    def _execute_lifecycle(self, mnemonic: str) -> int | None:
+        if mnemonic == "BRK":
+            self._fetch_byte()
+            self._push_word(self._state.pc.value)
+            self._push_status(break_flag=True)
+            self._state.status.interrupt_disable = True
+            self._state.pc.value = self._read_vector(0xFFFE)
+            return 7
+        if mnemonic == "RTI":
+            self._pop_status()
+            self._state.pc.value = self._pop_word()
+            return 6
+        if mnemonic == "PHP":
+            self._push_status(break_flag=True)
+            return 3
+        if mnemonic == "PLP":
+            self._pop_status()
+            return 4
+        return None
 
     def step(self, *, cycles: int = 0) -> InstructionStep | ResetStep | InterruptStep:
         """Accept RESET, IRQ, or NMI before routing an opcode at a boundary.
@@ -683,8 +712,10 @@ class CPU:
             return self._accept_interrupt(boundary, nmi=False)
         opcode_address = _normalize_word_address(self._state.pc.value)
         opcode = self._fetch_byte()
-        self.dispatch_opcode(opcode)
-        total_cycles = self.record_cycles(cycles)
+        definition = self.dispatch_opcode(opcode)
+        lifecycle_cycles = self._execute_lifecycle(definition.mnemonic)
+        executed_cycles = lifecycle_cycles if lifecycle_cycles is not None else cycles
+        total_cycles = self.record_cycles(executed_cycles)
         return InstructionStep(
             context=InstructionContext(
                 state=self._state,
@@ -692,7 +723,7 @@ class CPU:
                 opcode_address=opcode_address,
                 opcode=opcode,
             ),
-            cycles=cycles,
+            cycles=executed_cycles,
             total_cycles=total_cycles,
         )
 
