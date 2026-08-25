@@ -158,8 +158,7 @@ class OpcodeDefinition:
         return 1 + self.operand_bytes
 
 
-# The catalog deliberately contains metadata only. Instruction semantics are added
-# by later phases without changing boundary fetch or addressing dispatch.
+# The catalog contains canonical routing and timing metadata for official opcodes.
 _OPCODE_ROWS = (
     (
         "69 65 75 6D 7D 79 61 71",
@@ -787,6 +786,20 @@ class CPU:
         """Execute implemented register, transfer, and logical families."""
         mnemonic = definition.mnemonic
         page_crossed = False
+        if mnemonic in {"CLC", "CLD", "CLI", "CLV", "SEC", "SED", "SEI"}:
+            flag = {
+                "CLC": "carry",
+                "CLD": "decimal",
+                "CLI": "interrupt_disable",
+                "CLV": "overflow",
+                "SEC": "carry",
+                "SED": "decimal",
+                "SEI": "interrupt_disable",
+            }[mnemonic]
+            setattr(self._state.status, flag, mnemonic in {"SEC", "SED", "SEI"})
+            return definition.cycles
+        if mnemonic == "NOP":
+            return definition.cycles
         if mnemonic == "JMP":
             result = self.resolve_addressing(definition.addressing_mode)
             if result.address is None:
