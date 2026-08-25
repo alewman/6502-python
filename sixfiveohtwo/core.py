@@ -960,7 +960,9 @@ class CPU:
             if updates_flags:
                 self._update_nz(target.value)
         else:
-            return None
+            raise RuntimeError(
+                f"official opcode has no implementation: 0x{definition.opcode:02X}"
+            )
 
         return definition.cycles + int(definition.page_cross_penalty and page_crossed)
 
