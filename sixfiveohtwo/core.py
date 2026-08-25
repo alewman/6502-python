@@ -787,6 +787,24 @@ class CPU:
         """Execute implemented register, transfer, and logical families."""
         mnemonic = definition.mnemonic
         page_crossed = False
+        if mnemonic in {"BCC", "BCS", "BEQ", "BMI", "BNE", "BPL", "BVC", "BVS"}:
+            result = self.resolve_relative_address()
+            conditions = {
+                "BCC": not self._state.status.carry,
+                "BCS": self._state.status.carry,
+                "BEQ": self._state.status.zero,
+                "BMI": self._state.status.negative,
+                "BNE": not self._state.status.zero,
+                "BPL": not self._state.status.negative,
+                "BVC": not self._state.status.overflow,
+                "BVS": self._state.status.overflow,
+            }
+            if conditions[mnemonic]:
+                if result.address is None:
+                    raise ValueError(f"{mnemonic} requires a relative target")
+                self._state.pc.value = result.address
+                return definition.cycles + 1 + int(result.page_crossed)
+            return definition.cycles
         if mnemonic in {"ADC", "SBC"}:
             result = self.resolve_addressing(definition.addressing_mode)
             page_crossed = result.page_crossed
