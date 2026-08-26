@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -186,6 +186,88 @@ def load_vector_file(path: str | Path) -> list[SingleStepVector]:
         parse_vector_record(record, source, index)
         for index, record in enumerate(payload)
     ]
+
+
+def iter_vector_file(path: str | Path) -> Iterator[SingleStepVector]:
+    """Yield validated records from a JSON array without retaining the array."""
+    source = str(path)
+    decoder = json.JSONDecoder()
+    try:
+        with Path(path).open(encoding="utf-8") as stream:
+            buffer = ""
+            position = 0
+            eof = False
+
+            def need_data() -> bool:
+                nonlocal buffer, position, eof
+                if eof:
+                    return False
+                chunk = stream.read(64 * 1024)
+                if chunk:
+                    buffer = buffer[position:] + chunk
+                    position = 0
+                    return True
+                buffer = buffer[position:]
+                position = 0
+                eof = True
+                return False
+
+            while True:
+                while True:
+                    while position < len(buffer) and buffer[position].isspace():
+                        position += 1
+                    if position < len(buffer) or not need_data():
+                        break
+                if position >= len(buffer) or buffer[position] != "[":
+                    raise VectorValidationError(
+                        f"{source}: vector file must contain an array"
+                    )
+                position += 1
+                break
+
+            index = 0
+            while True:
+                while True:
+                    while position < len(buffer) and buffer[position].isspace():
+                        position += 1
+                    if position < len(buffer) or not need_data():
+                        break
+                if position >= len(buffer):
+                    raise VectorValidationError(f"{source}: unterminated vector array")
+                if buffer[position] == "]":
+                    return
+                while True:
+                    try:
+                        record, end = decoder.raw_decode(buffer, position)
+                    except json.JSONDecodeError:
+                        if not need_data():
+                            raise VectorValidationError(
+                                f"{source}: invalid JSON near record {index}"
+                            ) from None
+                    else:
+                        position = end
+                        yield parse_vector_record(record, source, index)
+                        index += 1
+                        break
+                while True:
+                    while position < len(buffer) and buffer[position].isspace():
+                        position += 1
+                    if position < len(buffer) or not need_data():
+                        break
+                if position >= len(buffer):
+                    raise VectorValidationError(f"{source}: unterminated vector array")
+                if buffer[position] == ",":
+                    position += 1
+                    continue
+                if buffer[position] == "]":
+                    return
+                raise VectorValidationError(
+                    f"{source}: expected ',' or ']' after record {index - 1}"
+                )
+    except (OSError, UnicodeError) as error:
+        raise VectorValidationError(
+            f"{source}: unable to read JSON: {error}"
+        ) from error
 
 
 def adapt_vector(vector: SingleStepVector) -> tuple[CPU, VectorMemory]:
