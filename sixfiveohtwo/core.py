@@ -49,25 +49,29 @@ def _adc_result(
     """Return ADC result and flags, retaining NMOS binary intermediate flags."""
     binary_sum = accumulator + operand + int(carry)
     binary_result = binary_sum & 0xFF
-    overflow = bool(~(accumulator ^ operand) & (accumulator ^ binary_result) & 0x80)
+    zero = binary_result == 0
     if decimal:
-        adjusted_sum = binary_sum
-        if ((accumulator & 0x0F) + (operand & 0x0F) + int(carry)) > 9:
-            adjusted_sum += 6
-        if adjusted_sum > 0x99:
-            adjusted_sum += 0x60
-        result = adjusted_sum & 0xFF
-        carry_out = adjusted_sum > 0xFF
+        low_sum = (accumulator & 0x0F) + (operand & 0x0F) + int(carry)
+        if low_sum >= 0x0A:
+            low_sum = ((low_sum + 0x06) & 0x0F) + 0x10
+        high_sum = (accumulator & 0xF0) + (operand & 0xF0) + low_sum
+        # N and V reflect the low-nibble-corrected intermediate, before the final
+        # high-byte +0x60 correction -- a documented NMOS decimal-mode quirk.
+        intermediate_result = high_sum & 0xFF
+        negative = bool(intermediate_result & 0x80)
+        overflow = bool(
+            ~(accumulator ^ operand) & (accumulator ^ intermediate_result) & 0x80
+        )
+        if high_sum >= 0xA0:
+            high_sum += 0x60
+        result = high_sum & 0xFF
+        carry_out = high_sum >= 0x100
     else:
         result = binary_result
         carry_out = binary_sum > 0xFF
-    return (
-        result,
-        carry_out,
-        bool(binary_result & 0x80),
-        overflow,
-        binary_result == 0,
-    )
+        negative = bool(binary_result & 0x80)
+        overflow = bool(~(accumulator ^ operand) & (accumulator ^ binary_result) & 0x80)
+    return (result, carry_out, negative, overflow, zero)
 
 
 def _sbc_result(
@@ -299,7 +303,17 @@ _OPCODE_ROWS = (
 
 def _build_opcode_catalog() -> Mapping[int, OpcodeDefinition]:
     catalog: dict[int, OpcodeDefinition] = {}
-    page_penalty_mnemonics = {"ADC", "AND", "CMP", "EOR", "LDA", "ORA", "SBC"}
+    page_penalty_mnemonics = {
+        "ADC",
+        "AND",
+        "CMP",
+        "EOR",
+        "LDA",
+        "LDX",
+        "LDY",
+        "ORA",
+        "SBC",
+    }
     page_penalty_modes = {
         AddressingMode.ABSOLUTE_X,
         AddressingMode.ABSOLUTE_Y,
@@ -807,11 +821,15 @@ class CPU:
             self._state.pc.value = result.address
             return definition.cycles
         if mnemonic == "JSR":
-            result = self.resolve_addressing(AddressingMode.ABSOLUTE)
-            if result.address is None:
-                raise ValueError("JSR requires a target address")
-            self._push_word((self._state.pc.value - 1) & 0xFFFF)
-            self._state.pc.value = result.address
+            low = self._fetch_byte()
+            # Real NMOS hardware pushes the return address, then fetches the
+            # target's high byte LAST -- if that byte's address aliases the
+            # stack slot just written (rare but real), the CPU reads back its
+            # own pushed byte instead of the original operand.
+            return_address = self._state.pc.value
+            self._push_word(return_address)
+            high = self._read_operand(return_address)
+            self._state.pc.value = low | (high << 8)
             return definition.cycles
         if mnemonic in {"BCC", "BCS", "BEQ", "BMI", "BNE", "BPL", "BVC", "BVS"}:
             result = self.resolve_relative_address()

@@ -1,6 +1,8 @@
 import hashlib
 import io
 import tarfile
+import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -98,7 +100,36 @@ def test_fetch_uses_immutable_revisions_and_project_relative_destinations(
     assert functional.is_relative_to(tmp_path)
     assert functional.read_bytes() == contents
     assert decimal_ready is False
-    assert not (working_directory / "tests").exists()
+
+
+def test_fetch_confines_scratch_work_below_tests_dormann(tmp_path, monkeypatch):
+    contents = b"functional test"
+    monkeypatch.setattr(
+        fetch_dormann_tests,
+        "FUNCTIONAL_SHA256",
+        hashlib.sha256(contents).hexdigest(),
+    )
+    _offline_project(tmp_path, monkeypatch, _functional_archive(contents))
+
+    dormann_root = tmp_path / "tests" / "dormann"
+    real_temporary_directory = tempfile.TemporaryDirectory
+    created_under = []
+
+    class _RecordingTemporaryDirectory(real_temporary_directory):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            created_under.append(self.name)
+
+    monkeypatch.setattr(
+        fetch_dormann_tests.tempfile, "TemporaryDirectory", _RecordingTemporaryDirectory
+    )
+
+    fetch_dormann_tests.fetch_tests()
+
+    assert created_under
+    for path in created_under:
+        assert Path(path).is_relative_to(dormann_root)
+    assert not any(tmp_path.joinpath("tests").glob("dormann-*"))
 
 
 def test_fetch_is_idempotent_for_valid_downloads(tmp_path, monkeypatch):

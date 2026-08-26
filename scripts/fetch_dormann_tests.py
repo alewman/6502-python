@@ -182,9 +182,9 @@ def _build_decimal(source: Path, output: Path) -> bool:
 
 def fetch_tests() -> tuple[Path, bool]:
     root = _project_root()
-    (root / "tests").mkdir(parents=True, exist_ok=True)
+    (root / DESTINATION).mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
-        prefix="dormann-", dir=root / "tests"
+        prefix="fetch-", dir=root / DESTINATION
     ) as temporary:
         work = Path(temporary)
         functional_source = work / "functional"
