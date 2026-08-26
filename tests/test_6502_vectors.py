@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -11,12 +12,13 @@ from tests.vector_support import adapt_vector, iter_vector_file
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _VECTOR_ROOT = _PROJECT_ROOT / "tests" / "6502_test_vectors" / "6502"
+_FETCH_HINT = "run scripts/fetch_test_vectors.py"
 
 
-def _vector_files() -> tuple[Path, ...]:
+def _vector_files(vector_root: Path = _VECTOR_ROOT) -> tuple[Path, ...]:
     """Discover corpus files while keeping every path inside this checkout."""
     project_root = _PROJECT_ROOT.resolve()
-    root = _VECTOR_ROOT.resolve()
+    root = vector_root.resolve()
     try:
         root.relative_to(project_root)
     except ValueError:
@@ -115,11 +117,43 @@ def _assert_post_state(vector, cpu, memory, result):
 @pytest.mark.parametrize("source", _FILE_CASES, ids=_FILE_IDS)
 def test_6502_vectors(source: Path | None):
     if source is None:
-        pytest.skip(
-            "SingleStepTests vectors are missing; run scripts/fetch_test_vectors.py"
-        )
+        pytest.skip(f"SingleStepTests vectors are missing; {_FETCH_HINT}")
 
     for vector in iter_vector_file(source):
         cpu, memory = adapt_vector(vector)
         result = cpu.step()
         _assert_post_state(vector, cpu, memory, result)
+
+
+@pytest.mark.parametrize("layout", ["missing", "empty", "wrong-parent"])
+def test_vector_discovery_returns_no_sources_for_absent_layouts(
+    tmp_path, monkeypatch, layout
+):
+    monkeypatch.setattr(sys.modules[__name__], "_PROJECT_ROOT", tmp_path)
+    vector_root = tmp_path / "tests" / "6502_test_vectors" / "6502"
+    if layout == "empty":
+        vector_root.mkdir(parents=True)
+    elif layout == "wrong-parent":
+        wrong_root = tmp_path / "tests" / "6502_test_vectors" / "v1"
+        wrong_root.mkdir(parents=True)
+        (wrong_root / "00.json").write_text("[]")
+
+    assert _vector_files(vector_root) == ()
+
+
+def test_missing_vectors_skip_with_fetch_instructions():
+    with pytest.raises(pytest.skip.Exception, match="scripts/fetch_test_vectors\\.py"):
+        test_6502_vectors(None)
+
+
+def test_vector_discovery_finds_populated_corpus_without_fetching(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(sys.modules[__name__], "_PROJECT_ROOT", tmp_path)
+    vector_root = tmp_path / "tests" / "6502_test_vectors" / "6502"
+    vector_root.mkdir(parents=True)
+    source = vector_root / "v1" / "ea.json"
+    source.parent.mkdir()
+    source.write_text("[]")
+
+    assert _vector_files(vector_root) == (source.resolve(),)
