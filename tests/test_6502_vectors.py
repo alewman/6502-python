@@ -44,13 +44,72 @@ _FILE_IDS = [
 ] or ["vector corpus missing"]
 
 
-def _expected_operations(vector):
-    return [
-        (direction, address)
-        if direction == "read"
-        else (direction, address, value)
-        for address, value, direction in vector.cycles
-    ]
+def _context(vector, opcode):
+    return (
+        f"{vector.source} [record {vector.index}, {vector.name}, "
+        f"opcode 0x{opcode:02X}]"
+    )
+
+
+def _assert_field(context, field, actual, expected):
+    message = f"{context}: {field}: expected {expected!r}, got {actual!r}"
+    assert actual == expected, message
+
+
+def _assert_post_state(vector, cpu, memory, result):
+    initial_ram = dict(vector.initial["ram"])
+    expected_ram = dict(vector.final["ram"])
+    opcode = initial_ram.get(vector.initial["pc"], 0)
+    context = _context(vector, opcode)
+    state = cpu.state
+
+    _assert_field(context, "cycles (step)", result.cycles, len(vector.cycles))
+    _assert_field(context, "cycles (state total)", state.cycles, len(vector.cycles))
+    for field, actual, expected in (
+        ("a", state.a.value, vector.final["a"]),
+        ("x", state.x.value, vector.final["x"]),
+        ("y", state.y.value, vector.final["y"]),
+        ("pc", state.pc.value, vector.final["pc"]),
+        ("sp", state.sp.value, vector.final["s"]),
+    ):
+        _assert_field(context, field, actual, expected)
+
+    actual_status = pack_status_byte(state.status)
+    _assert_field(context, "status byte (p)", actual_status, vector.final["p"])
+    flag_bits = {
+        "negative": 0x80,
+        "overflow": 0x40,
+        "decimal": 0x08,
+        "interrupt_disable": 0x04,
+        "zero": 0x02,
+        "carry": 0x01,
+    }
+    for name, bit in flag_bits.items():
+        _assert_field(
+            context,
+            f"status flag {name}",
+            getattr(state.status, name),
+            bool(vector.final["p"] & bit),
+        )
+
+    # The corpus RAM sections are sparse snapshots; compare every oracle address
+    # and reject emulator state that introduces an extra sparse entry.
+    _assert_field(context, "memory addresses", set(memory.bytes), set(expected_ram))
+    for address, expected in sorted(expected_ram.items()):
+        _assert_field(
+            context, f"memory[0x{address:04X}]", memory.bytes[address], expected
+        )
+    expected_mutations = {
+        address: value
+        for address, value in expected_ram.items()
+        if initial_ram.get(address) != value
+    }
+    actual_mutations = {
+        address: memory.bytes[address]
+        for address in memory.bytes
+        if initial_ram.get(address) != memory.bytes[address]
+    }
+    _assert_field(context, "memory mutations", actual_mutations, expected_mutations)
 
 
 @pytest.mark.parametrize("source", _FILE_CASES, ids=_FILE_IDS)
@@ -63,15 +122,4 @@ def test_6502_vectors(source: Path | None):
     for vector in iter_vector_file(source):
         cpu, memory = adapt_vector(vector)
         result = cpu.step()
-        final = vector.final
-
-        assert result.cycles == len(vector.cycles), vector.name
-        assert cpu.state.cycles == len(vector.cycles), vector.name
-        assert cpu.state.pc.value == final["pc"], vector.name
-        assert cpu.state.sp.value == final["s"], vector.name
-        assert cpu.state.a.value == final["a"], vector.name
-        assert cpu.state.x.value == final["x"], vector.name
-        assert cpu.state.y.value == final["y"], vector.name
-        assert pack_status_byte(cpu.state.status) == final["p"], vector.name
-        assert memory.bytes == dict(final["ram"]), vector.name
-        assert memory.operations == _expected_operations(vector), vector.name
+        _assert_post_state(vector, cpu, memory, result)
