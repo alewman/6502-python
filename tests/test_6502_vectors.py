@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from sixfiveohtwo import pack_status_byte
+from sixfiveohtwo.core import OFFICIAL_OPCODES
 from tests.vector_support import adapt_vector, iter_vector_file
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -39,11 +40,30 @@ def _vector_files(vector_root: Path = _VECTOR_ROOT) -> tuple[Path, ...]:
 
 
 _SOURCES = _vector_files()
-_FILE_CASES: tuple[Path | None, ...] = _SOURCES or (None,)
-_FILE_IDS = [
-    f"vector:6502/{path.relative_to(_VECTOR_ROOT.resolve()).as_posix()}"
-    for path in _SOURCES
-] or ["vector corpus missing"]
+
+
+def _file_case(path: Path) -> pytest.ParameterSet:
+    """Build one file's test param, xfailing unofficial opcodes per the documented scope."""
+    file_id = f"vector:6502/{path.relative_to(_VECTOR_ROOT.resolve()).as_posix()}"
+    try:
+        opcode = int(path.stem, 16)
+    except ValueError:
+        return pytest.param(path, id=file_id)
+    if opcode not in OFFICIAL_OPCODES:
+        return pytest.param(
+            path,
+            id=file_id,
+            marks=pytest.mark.xfail(
+                reason="unofficial/illegal 6502 opcode; excluded per README/phase 3 scope",
+                strict=False,
+            ),
+        )
+    return pytest.param(path, id=file_id)
+
+
+_FILE_CASES: tuple[pytest.ParameterSet, ...] = tuple(
+    _file_case(path) for path in _SOURCES
+) or (pytest.param(None, id="vector corpus missing"),)
 
 
 def _context(vector, opcode):
@@ -114,7 +134,7 @@ def _assert_post_state(vector, cpu, memory, result):
     _assert_field(context, "memory mutations", actual_mutations, expected_mutations)
 
 
-@pytest.mark.parametrize("source", _FILE_CASES, ids=_FILE_IDS)
+@pytest.mark.parametrize("source", _FILE_CASES)
 def test_6502_vectors(source: Path | None):
     if source is None:
         pytest.skip(f"SingleStepTests vectors are missing; {_FETCH_HINT}")
