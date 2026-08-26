@@ -76,12 +76,12 @@ next `sample_instruction_boundary()` call; drive NMI low before another rising
 edge can be recognized:
 
 ```python
-cpu.set_nmi(True)                         # latch one rising edge
+cpu.set_nmi(True)  # latch one rising edge
 pending = cpu.pending_interrupt_boundary()  # inspect; does not consume NMI
-accepted = cpu.sample_instruction_boundary() # accepted.nmi is True
+accepted = cpu.sample_instruction_boundary()  # accepted.nmi is True
 cpu.set_nmi(False)
 
-cpu.signal_nmi()                          # latch without a persistent level
+cpu.signal_nmi()  # latch without a persistent level
 accepted = cpu.sample_instruction_boundary()
 ```
 
