@@ -102,9 +102,7 @@ def _ram(value: Any, label: str, source: str, index: int) -> list[tuple[int, int
                 _bounded(
                     pair[0], f"{label}[{pair_index}] address", 0xFFFF, source, index
                 ),
-                _bounded(
-                    pair[1], f"{label}[{pair_index}] value", 0xFF, source, index
-                ),
+                _bounded(pair[1], f"{label}[{pair_index}] value", 0xFF, source, index),
             )
         )
     return result
@@ -156,9 +154,7 @@ def parse_vector_record(
         address = _bounded(
             cycle[0], f"cycles[{cycle_index}] address", 0xFFFF, source, index
         )
-        value = _bounded(
-            cycle[1], f"cycles[{cycle_index}] value", 0xFF, source, index
-        )
+        value = _bounded(cycle[1], f"cycles[{cycle_index}] value", 0xFF, source, index)
         direction = cycle[2]
         if direction not in ("read", "write"):
             raise _error(
@@ -179,9 +175,7 @@ def load_vector_file(path: str | Path) -> list[SingleStepVector]:
             f"{source}: unable to read JSON: {error}"
         ) from error
     if not isinstance(payload, list):
-        raise VectorValidationError(
-            f"{source}: vector file must contain an array"
-        )
+        raise VectorValidationError(f"{source}: vector file must contain an array")
     return [
         parse_vector_record(record, source, index)
         for index, record in enumerate(payload)

@@ -117,14 +117,14 @@ def run_dormann(
             f"P=0x{flags:02X} ({state.status})"
             + (f"; memory: {values}" if values else "")
         )
+
     for steps in range(1, budget + 1):
         cpu.step()
         pc = cpu.state.pc.value
         if pc in failure_pcs or (
             pc in success_pcs
             and any(
-                memory.read_byte(address) != 0
-                for address in failure_memory_addresses
+                memory.read_byte(address) != 0 for address in failure_memory_addresses
             )
         ):
             detail = "failure trap" if pc in failure_pcs else "failure marker"

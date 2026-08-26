@@ -43,7 +43,7 @@ _SOURCES = _vector_files()
 
 
 def _file_case(path: Path) -> pytest.ParameterSet:
-    """Build one file's test param, xfailing unofficial opcodes per the documented scope."""
+    """Build one file's test param, xfailing unofficial opcodes per documented scope."""
     file_id = f"vector:6502/{path.relative_to(_VECTOR_ROOT.resolve()).as_posix()}"
     try:
         opcode = int(path.stem, 16)
@@ -54,7 +54,7 @@ def _file_case(path: Path) -> pytest.ParameterSet:
             path,
             id=file_id,
             marks=pytest.mark.xfail(
-                reason="unofficial/illegal 6502 opcode; excluded per README/phase 3 scope",
+                reason="unofficial/illegal opcode; excluded per README/phase 3 scope",
                 strict=False,
             ),
         )
@@ -68,8 +68,7 @@ _FILE_CASES: tuple[pytest.ParameterSet, ...] = tuple(
 
 def _context(vector, opcode):
     return (
-        f"{vector.source} [record {vector.index}, {vector.name}, "
-        f"opcode 0x{opcode:02X}]"
+        f"{vector.source} [record {vector.index}, {vector.name}, opcode 0x{opcode:02X}]"
     )
 
 

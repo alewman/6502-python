@@ -12,9 +12,7 @@ import tempfile
 from pathlib import Path, PurePosixPath
 from urllib.request import urlopen
 
-FUNCTIONAL_REPOSITORY_URL = (
-    "https://github.com/Klaus2m5/6502_65C02_functional_tests"
-)
+FUNCTIONAL_REPOSITORY_URL = "https://github.com/Klaus2m5/6502_65C02_functional_tests"
 FUNCTIONAL_REVISION = "7954e2dbb49c469ea286070bf46cdd71aeb29e4b"
 FUNCTIONAL_ARCHIVE_URL = (
     f"{FUNCTIONAL_REPOSITORY_URL}/archive/{FUNCTIONAL_REVISION}.tar.gz"
@@ -128,9 +126,7 @@ def _build_decimal(source: Path, output: Path) -> bool:
     ld65 = shutil.which("ld65")
     if ca65 is None or ld65 is None:
         missing = ", ".join(
-            tool
-            for tool, path in (("ca65", ca65), ("ld65", ld65))
-            if path is None
+            tool for tool, path in (("ca65", ca65), ("ld65", ld65)) if path is None
         )
         print(
             f"skipping decimal-test provisioning: missing cc65 toolchain ({missing}); "
