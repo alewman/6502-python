@@ -4,13 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from sixfiveohtwo import CPU, CPUState
-from tests.dormann_support import (
-    DormannAssetError,
-    dormann_binary,
-    load_dormann_asset,
-    run_dormann,
-)
+from tests.dormann_support import DormannAssetError, dormann_binary, run_dormann
 
 
 @pytest.mark.integration
@@ -36,25 +30,19 @@ def test_functional_exerciser_passes(name, start, success_pc):
 @pytest.mark.integration
 def test_decimal_exerciser_passes():
     try:
-        memory = load_dormann_asset("6502_decimal_test.bin")
+        result = run_dormann(
+            "6502_decimal_test.bin",
+            asset=True,
+            start=0x0400,
+            budget=20_000_000,
+            success_pcs=frozenset({0x044B}),
+            failure_memory_addresses=frozenset({0x000B}),
+            diagnostic_memory_addresses=frozenset(range(0x000C)),
+        )
     except DormannAssetError as error:
         pytest.skip(str(error))
-    cpu = CPU(memory, state=CPUState(program_counter=0x0400))
 
-    for steps in range(1, 20_000_000 + 1):
-        cpu.step()
-        if cpu.state.pc.value == 0x044B:
-            if memory.read_byte(0x000B) != 0:
-                pytest.fail(
-                    "Dormann decimal exerciser failed at 0x044B after "
-                    f"{steps} instructions"
-                )
-            return
-
-    pytest.fail(
-        "Dormann decimal exerciser exhausted its 20000000-instruction budget "
-        f"at 0x{cpu.state.pc.value:04X}"
-    )
+    assert result.status == "success", f"{result.message}; {result.diagnostics}"
 
 
 def test_dormann_locator_rejects_paths_outside_bin_files(tmp_path, monkeypatch):
