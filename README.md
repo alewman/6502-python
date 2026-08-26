@@ -130,3 +130,28 @@ The v1 core explicitly does **not** provide or emulate:
 The host remains responsible for the memory and device environment around the
 core. See [Embedding](#embedding) for the host-memory and interrupt-line
 contract.
+
+## Validation with SingleStepTests
+
+The test suite can validate one-instruction NMOS 6502 behavior against the
+MIT-licensed [SingleStepTests 65x02 corpus](https://github.com/SingleStepTests/65x02),
+using immutable revision
+`2f6980a2d95757486c7bee24355c360e40e2a224` from the `SingleStepTests/65x02`
+repository. From the project root, fetch it with:
+
+```console
+python scripts/fetch_test_vectors.py
+```
+
+The pinned corpus is stored at the gitignored project-relative path
+`tests/6502_test_vectors/6502/`. Pytest remains offline: it never fetches
+vectors, and missing local vectors produce a skip with the fetch command. With
+the corpus present, the runner executes all JSON records and checks cycle
+counts, A/X/Y/PC/SP, the packed status byte and persistent flags, sparse final
+RAM, and memory mutations.
+
+This validates instruction-core behavior, not cycle-accurate bus pins or a
+complete host machine. It does not establish correctness for machine-specific
+maps/devices, host-bus integration, undocumented opcodes, or other CPU variants.
+See [the detailed validation documentation](docs/validation.md) for scope and
+provenance.

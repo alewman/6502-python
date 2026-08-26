@@ -1,78 +1,48 @@
-# Validation strategy
+# Validation
 
-This document describes the intended validation strategy for the 6502 core. It is
-an implementation plan, not a bundled test corpus. No external vectors or
-exerciser binaries are downloaded, checked in, or required by the package at
-this stage.
+## Pinned SingleStepTests oracle
 
-## External oracles
+The project uses the MIT-licensed [SingleStepTests 65x02
+corpus](https://github.com/SingleStepTests/65x02) as an external oracle for
+one-instruction NMOS 6502 execution. The source attribution is the
+`SingleStepTests/65x02` repository at the immutable revision
+`2f6980a2d95757486c7bee24355c360e40e2a224`. The revision and archive URL are
+also defined in `scripts/fetch_test_vectors.py`, which is the canonical fetch
+configuration.
 
-When the validation assets phase is implemented, opt-in integration tests should
-use the following independent sources:
-
-- **SingleStepTests 65x02 vectors** for instruction-by-instruction comparisons
-  of registers, flags, memory effects, and supported addressing modes.
-- **Klaus Dormann functional exerciser** for broad official-instruction and
-  control-flow coverage.
-- **Klaus Dormann decimal exerciser** for NMOS decimal-mode ADC and SBC
-  behavior, including status-flag results.
-
-These sources should be treated as external oracles rather than runtime
-dependencies. The package's normal test suite must remain dependency-free and
-must not require network access or locally installed corpus files.
-
-## Provenance and reproducibility
-
-The SingleStepTests 65x02 source pin is defined in
-`scripts/fetch_test_vectors.py`. That dependency-free configuration contains the
-repository URL, immutable commit, archive URL, expected `6502` source directory,
-and the archive checksum field (when the upstream source publishes one). Keep
-this file as the only source of the revision; do not copy the commit into this
-document or other scripts.
-
-Fetch the ignored corpus explicitly from the project root with:
+Fetch the corpus explicitly from the project root:
 
 ```console
 python scripts/fetch_test_vectors.py
 ```
 
-The downloaded files belong under `tests/6502_test_vectors/6502/`; pytest must
-use only that local directory and must not download vectors. The upstream
-repository currently provides no archive checksum, so the fetch configuration
-leaves its optional checksum unset rather than inventing integrity metadata.
-For any external input added later, record its source, revision or release,
-acquisition date, and cryptographic hash when available.
+The script downloads that pinned archive and installs its `6502` directory at
+the gitignored, project-relative location
+`tests/6502_test_vectors/6502/`. It does not make the corpus part of the package
+or wheel. The archive has no upstream-published checksum; integrity is pinned
+by the immutable revision URL rather than by an invented checksum.
 
-## Opt-in execution
+## Running validation
 
-External validation should be separate from the default unit-test run and
-explicitly opt in to avoid accidental downloads or long-running checks. A
-future repository-supported command or test marker should:
+`pytest` is offline by design. It never invokes the fetch script or accesses the
+network. When the local corpus is absent, `tests/test_6502_vectors.py` skips
+with an actionable instruction to run `python scripts/fetch_test_vectors.py`.
+When present, the runner recursively discovers every JSON vector under
+`tests/6502_test_vectors/6502/` and executes every record in each file.
 
-1. verify that the required assets are present and match their recorded
-   provenance;
-2. fail clearly when assets are absent or do not match, rather than silently
-   substituting another version; and
-3. run the vector and exerciser adapters against the public embeddable core
-   and report the selected source identities.
+For each one-instruction vector, assertions cover the expected cycle count,
+complete post-state registers (A, X, Y, PC, and SP), the packed status byte and
+each persistent status flag, every sparse final-RAM value and address, and the
+set and values of memory mutations. The runner compares cycle totals, not the
+corpus's per-cycle bus-operation records.
 
-Asset acquisition, if supported, should be an explicit user action. External
-corpora must not be vendored into the source distribution or wheel.
+## Claim and limits
 
-## Validation scope and limits
-
-The oracles validate the NMOS 6502 instruction-core target described by the
-project documentation. They do not turn this package into a complete machine
-emulator. In particular, this strategy does not promise validation of:
-
-- unofficial or undocumented opcodes;
-- 65C02 or 65816 instructions or behavior;
-- machine-specific memory maps, devices, cartridges, or host buses beyond the
-  documented read/write contract;
-- cycle-accurate bus-pin activity or timing claims; or
-- behavior that is not represented by the selected oracle inputs.
-
-The integration layer should preserve the host-provided memory and interrupt
-interfaces and should distinguish core execution results from machine-specific
-side effects. Passing an external oracle is evidence for the covered behavior,
-not a claim of exhaustive hardware equivalence.
+This validates instruction-core behavior represented by the selected
+SingleStepTests inputs. It does not validate cycle-accurate bus pins or bus
+activity, and it does not claim to validate a complete host machine. In
+particular, it says nothing by itself about machine-specific memory maps,
+devices, cartridges, host-bus integration, undocumented opcodes, or CPU
+variants such as the 65C02 and 65816. Passing the oracle is evidence for the
+covered instruction behavior, not proof of exhaustive hardware equivalence.
+.
