@@ -13,6 +13,7 @@ packages = ["sixfiveohtwo"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["integration: opt-in execution of externally provisioned Dormann binaries"]
 
 [tool.ruff]
 target-version = "py312"
