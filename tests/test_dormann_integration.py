@@ -19,13 +19,16 @@ from tests.dormann_support import (
     [("6502_functional_test.bin", 0x0400, 0x36DD)],
 )
 def test_functional_exerciser_passes(name, start, success_pc):
-    result = run_dormann(
-        name,
-        start=start,
-        budget=5_000_000,
-        success_pcs=frozenset({success_pc}),
-        failure_pcs=frozenset({0x3469}),
-    )
+    try:
+        result = run_dormann(
+            name,
+            start=start,
+            budget=5_000_000,
+            success_pcs=frozenset({success_pc}),
+            failure_pcs=frozenset({0x3469}),
+        )
+    except DormannAssetError as error:
+        pytest.skip(str(error))
 
     assert result.status == "success", result.message
 
