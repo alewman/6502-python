@@ -76,6 +76,7 @@ class DormannRun:
     steps: int
     pc: int
     message: str
+    diagnostics: str = ""
 
 
 def run_dormann(
@@ -86,15 +87,36 @@ def run_dormann(
     success_pcs: frozenset[int],
     failure_pcs: frozenset[int] = frozenset(),
     failure_memory_addresses: frozenset[int] = frozenset(),
+    diagnostic_memory_addresses: frozenset[int] = frozenset(),
     load_address: int = 0,
+    asset: bool = False,
 ) -> DormannRun:
     """Execute one instruction per public ``CPU.step`` call until a trap."""
     if budget <= 0:
         raise ValueError("budget must be positive")
     if not 0 <= start <= 0xFFFF:
         raise ValueError("start must fit in 16 bits")
-    memory = load_dormann_binary(name, load_address=load_address)
+    memory = (
+        load_dormann_asset(name, load_address=load_address)
+        if asset
+        else load_dormann_binary(name, load_address=load_address)
+    )
     cpu = CPU(memory, state=CPUState(program_counter=start))
+
+    def diagnostics() -> str:
+        state = cpu.state
+        flags = state.status.to_byte()
+        values = ", ".join(
+            f"0x{address:04X}=0x{memory.read_byte(address):02X}"
+            for address in sorted(diagnostic_memory_addresses)
+        )
+        return (
+            f"A=0x{state.a.value:02X} X=0x{state.x.value:02X} "
+            f"Y=0x{state.y.value:02X} SP=0x{state.sp.value:02X} "
+            f"PC=0x{state.pc.value:04X} cycles={state.cycles} "
+            f"P=0x{flags:02X} ({state.status})"
+            + (f"; memory: {values}" if values else "")
+        )
     for steps in range(1, budget + 1):
         cpu.step()
         pc = cpu.state.pc.value
@@ -107,11 +129,19 @@ def run_dormann(
         ):
             detail = "failure trap" if pc in failure_pcs else "failure marker"
             return DormannRun(
-                "failure", steps, pc, f"Dormann {name} reached {detail} at 0x{pc:04X}"
+                "failure",
+                steps,
+                pc,
+                f"Dormann {name} reached {detail} at 0x{pc:04X}",
+                diagnostics(),
             )
         if pc in success_pcs:
             return DormannRun(
-                "success", steps, pc, f"Dormann {name} passed at 0x{pc:04X}"
+                "success",
+                steps,
+                pc,
+                f"Dormann {name} passed at 0x{pc:04X}",
+                diagnostics(),
             )
     pc = cpu.state.pc.value
     return DormannRun(
@@ -119,6 +149,7 @@ def run_dormann(
         budget,
         pc,
         f"Dormann {name} exhausted the {budget}-instruction budget at 0x{pc:04X}",
+        diagnostics(),
     )
 
 
