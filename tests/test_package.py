@@ -1,5 +1,6 @@
 import importlib
 import sys
+import types
 
 import pytest
 
@@ -19,7 +20,14 @@ def test_package_imports_on_supported_python():
 def test_package_exposes_memory_bus():
     package = importlib.import_module("sixfiveohtwo")
 
-    public_symbols = {name for name in vars(package) if not name.startswith("_")}
+    # Excludes submodules: importing any lazily-loaded name (e.g. CPU) attaches
+    # its owning submodule to the package namespace as an unavoidable CPython
+    # side effect, independent of test order or what other tests imported.
+    public_symbols = {
+        name
+        for name, value in vars(package).items()
+        if not name.startswith("_") and not isinstance(value, types.ModuleType)
+    }
 
     assert package.__all__ == ("MemoryBus",)
-    assert public_symbols == {"MemoryBus", "memory"}
+    assert public_symbols == {"MemoryBus"}
