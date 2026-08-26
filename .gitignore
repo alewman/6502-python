@@ -7,4 +7,5 @@ __pycache__/
 dist/
 build/
 /tests/6502_test_vectors/
+# Dormann binaries and temporary source/build assets are fetched locally.
 /tests/dormann/
