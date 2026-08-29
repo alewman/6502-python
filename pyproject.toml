@@ -5,8 +5,36 @@ build-backend = "hatchling.build"
 [project]
 name = "6502-python"
 version = "0.1.0"
+description = "Readable, pure-Python NMOS 6502 instruction-core reference implementation"
+readme = "README.md"
 requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [{ name = "alewman" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: System :: Emulators",
+]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/alewman/6502-python"
+Repository = "https://github.com/alewman/6502-python"
+Issues = "https://github.com/alewman/6502-python/issues"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "ruff>=0.15",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["sixfiveohtwo"]

@@ -38,4 +38,11 @@ def test_wheel_build_uses_hatchling_without_runtime_dependencies(tmp_path):
         metadata = wheel.read(metadata_name).decode("utf-8")
 
     assert "sixfiveohtwo/__init__.py" in names
-    assert "Requires-Dist:" not in metadata
+    # Optional extras carry an `extra ==` marker; unmarked entries install at runtime.
+    runtime_requirements = [
+        line
+        for line in metadata.splitlines()
+        if line.startswith("Requires-Dist:") and "extra ==" not in line
+    ]
+    assert runtime_requirements == []
+    assert "Provides-Extra: dev" in metadata
