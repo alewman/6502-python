@@ -263,6 +263,11 @@ _OPCODE_ROWS = (
         "ABSOLUTE_Y ABSOLUTE_X",
         "8 5 6 8 6 7 7",
     ),
+    ("0B 2B", "ANC", "IMMEDIATE IMMEDIATE", "2 2"),
+    ("4B", "ALR", "IMMEDIATE", "2"),
+    ("6B", "ARR", "IMMEDIATE", "2"),
+    ("CB", "SBX", "IMMEDIATE", "2"),
+    ("EB", "USBC", "IMMEDIATE", "2"),
     ("00", "BRK", "IMPLIED", "7"),
     ("90", "BCC", "RELATIVE", "2"),
     ("B0", "BCS", "RELATIVE", "2"),
@@ -973,7 +978,7 @@ class CPU:
                 self._state.pc.value = result.address
                 return definition.cycles + 1 + int(result.page_crossed)
             return definition.cycles
-        if mnemonic in {"ADC", "SBC"}:
+        if mnemonic in {"ADC", "SBC", "USBC"}:
             result = self.resolve_addressing(definition.addressing_mode)
             page_crossed = result.page_crossed
             if result.operand is None:
@@ -990,6 +995,53 @@ class CPU:
             self._state.status.negative = negative
             self._state.status.overflow = overflow
             self._state.status.zero = zero
+        elif mnemonic == "ANC":
+            result = self.resolve_addressing(definition.addressing_mode)
+            if result.operand is None:
+                raise ValueError("ANC requires an operand")
+            value = self._state.a.value & result.operand
+            self._state.a.value = value
+            self._update_nz(value)
+            self._state.status.carry = self._state.status.negative
+        elif mnemonic == "ALR":
+            result = self.resolve_addressing(definition.addressing_mode)
+            if result.operand is None:
+                raise ValueError("ALR requires an operand")
+            value = self._state.a.value & result.operand
+            self._state.status.carry = bool(value & 0x01)
+            self._state.a.value = value >> 1
+            self._update_nz(self._state.a.value)
+        elif mnemonic == "ARR":
+            result = self.resolve_addressing(definition.addressing_mode)
+            if result.operand is None:
+                raise ValueError("ARR requires an operand")
+            value = self._state.a.value & result.operand
+            binary_result = (value >> 1) | (int(self._state.status.carry) << 7)
+            self._state.status.overflow = bool(
+                (binary_result ^ (binary_result << 1)) & 0x40
+            )
+            self._state.status.negative = bool(binary_result & 0x80)
+            self._state.status.zero = binary_result == 0
+            if self._state.status.decimal:
+                adjusted = binary_result
+                if (value & 0x0F) >= 0x05:
+                    adjusted = (adjusted & 0xF0) | ((adjusted + 0x06) & 0x0F)
+                self._state.status.carry = False
+                if (value & 0xF0) >= 0x50:
+                    adjusted += 0x60
+                    self._state.status.carry = True
+                self._state.a.value = adjusted & 0xFF
+            else:
+                self._state.a.value = binary_result
+                self._state.status.carry = bool(binary_result & 0x40)
+        elif mnemonic == "SBX":
+            result = self.resolve_addressing(definition.addressing_mode)
+            if result.operand is None:
+                raise ValueError("SBX requires an operand")
+            difference = (self._state.a.value & self._state.x.value) - result.operand
+            self._state.status.carry = difference >= 0
+            self._state.x.value = difference & 0xFF
+            self._update_nz(self._state.x.value)
         elif mnemonic in {"ORA", "AND", "EOR", "BIT"}:
             result = self.resolve_addressing(definition.addressing_mode)
             page_crossed = result.page_crossed
