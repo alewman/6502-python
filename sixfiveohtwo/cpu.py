@@ -111,7 +111,7 @@ class IndexRegisters:
             raise TypeError("x and y must be index registers or integers")
 
 
-def pack_status_byte(flags: "StatusFlags", *, break_flag: bool = False) -> int:
+def pack_status_byte(flags: "StatusFlags", *, break_flag: bool | None = None) -> int:
     """Pack persistent flags into an NMOS stack/observed status byte.
 
     Bit 5 is always one. B is supplied by the operation that creates the
@@ -119,8 +119,10 @@ def pack_status_byte(flags: "StatusFlags", *, break_flag: bool = False) -> int:
     """
     if not isinstance(flags, StatusFlags):
         raise TypeError("flags must be StatusFlags")
+    if break_flag is None:
+        break_flag = flags.break_flag
     if not isinstance(break_flag, bool):
-        raise TypeError("break_flag must be a boolean")
+        raise TypeError("break_flag must be a boolean or None")
     return (
         (int(flags.negative) << 7)
         | (int(flags.overflow) << 6)
@@ -143,6 +145,7 @@ def unpack_status_byte(value: int) -> "StatusFlags":
         interrupt_disable=bool(value & 0x04),
         zero=bool(value & 0x02),
         carry=bool(value & 0x01),
+        break_flag=bool(value & 0x10),
     )
 
 
@@ -160,6 +163,7 @@ class StatusFlags:
     interrupt_disable: bool = False
     zero: bool = False
     carry: bool = False
+    break_flag: bool = field(default=False, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         for name in (
@@ -169,6 +173,7 @@ class StatusFlags:
             "interrupt_disable",
             "zero",
             "carry",
+            "break_flag",
         ):
             if not isinstance(getattr(self, name), bool):
                 raise TypeError(f"{name} must be a boolean")
