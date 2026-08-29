@@ -243,6 +243,13 @@ _OPCODE_ROWS = (
         "INDEXED_INDIRECT ZERO_PAGE ABSOLUTE ZERO_PAGE_Y",
         "6 3 4 4",
     ),
+    ("93 9F", "SHA", "INDIRECT_INDEXED ABSOLUTE_Y", "6 5"),
+    ("9E", "SHX", "ABSOLUTE_Y", "5"),
+    ("9C", "SHY", "ABSOLUTE_X", "5"),
+    ("8B", "ANE", "IMMEDIATE", "2"),
+    ("AB", "LXA", "IMMEDIATE", "2"),
+    ("9B", "TAS", "ABSOLUTE_Y", "5"),
+    ("BB", "LAS", "ABSOLUTE_Y", "4"),
     (
         "A3 A7 AF B3 B7 BF",
         "LAX",
@@ -396,6 +403,7 @@ def _build_opcode_catalog() -> Mapping[int, OpcodeDefinition]:
         "LDX",
         "LDY",
         "LAX",
+        "LAS",
         "ORA",
         "SBC",
     }
@@ -1069,6 +1077,64 @@ class CPU:
             self._memory.write_byte(
                 result.address, self._state.a.value & self._state.x.value
             )
+        elif mnemonic in {"SHA", "SHX", "SHY", "TAS"}:
+            result = self.resolve_addressing(
+                definition.addressing_mode, read_operand=False
+            )
+            if result.address is None:
+                raise ValueError(f"{mnemonic} requires a memory address")
+            if result.page_crossed and definition.addressing_mode in {
+                AddressingMode.ABSOLUTE_X,
+                AddressingMode.ABSOLUTE_Y,
+                AddressingMode.INDIRECT_INDEXED,
+            }:
+                self._read_operand((result.address - 0x0100) & 0xFFFF)
+            index = (
+                self._state.x.value
+                if definition.addressing_mode is AddressingMode.ABSOLUTE_X
+                else self._state.y.value
+            )
+            base = (result.address - index) & 0xFFFF
+            high_mask = ((base >> 8) + 1) & 0xFF
+            if mnemonic == "TAS":
+                self._state.sp.value = self._state.a.value & self._state.x.value
+                value = self._state.sp.value & high_mask
+            elif mnemonic == "SHA":
+                value = self._state.a.value & self._state.x.value & high_mask
+            elif mnemonic == "SHX":
+                value = self._state.x.value & high_mask
+            else:
+                value = self._state.y.value & high_mask
+            write_address = result.address
+            if result.page_crossed:
+                write_address = (value << 8) | (result.address & 0x00FF)
+            self._memory.write_byte(write_address, value)
+        elif mnemonic == "LAS":
+            result = self.resolve_addressing(
+                definition.addressing_mode, read_operand=False
+            )
+            page_crossed = result.page_crossed
+            if result.address is None:
+                raise ValueError("LAS requires a memory address")
+            if result.page_crossed:
+                self._read_operand((result.address - 0x0100) & 0xFFFF)
+            operand = self._read_operand(result.address)
+            value = self._state.sp.value & operand
+            self._state.a.value = value
+            self._state.x.value = value
+            self._state.sp.value = value
+            self._update_nz(value)
+        elif mnemonic in {"ANE", "LXA"}:
+            result = self.resolve_addressing(definition.addressing_mode)
+            if result.operand is None:
+                raise ValueError(f"{mnemonic} requires an operand")
+            value = (self._state.a.value | 0xEE) & result.operand
+            if mnemonic == "ANE":
+                value &= self._state.x.value
+            self._state.a.value = value
+            if mnemonic == "LXA":
+                self._state.x.value = value
+            self._update_nz(value)
         elif mnemonic == "LAX":
             result = self.resolve_addressing(definition.addressing_mode)
             page_crossed = result.page_crossed
