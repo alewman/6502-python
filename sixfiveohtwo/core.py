@@ -123,6 +123,31 @@ class AddressingMode(StrEnum):
     INDIRECT_INDEXED = "indirect_indexed"
 
 
+_UNDOCUMENTED_NOP_ADDRESSING = {
+    0x04: (AddressingMode.ZERO_PAGE, 3),
+    0x0C: (AddressingMode.ABSOLUTE, 4),
+    0x14: (AddressingMode.ZERO_PAGE_X, 4),
+    0x1C: (AddressingMode.ABSOLUTE_X, 4),
+    0x34: (AddressingMode.ZERO_PAGE_X, 4),
+    0x3C: (AddressingMode.ABSOLUTE_X, 4),
+    0x44: (AddressingMode.ZERO_PAGE, 3),
+    0x54: (AddressingMode.ZERO_PAGE_X, 4),
+    0x5C: (AddressingMode.ABSOLUTE_X, 4),
+    0x64: (AddressingMode.ZERO_PAGE, 3),
+    0x74: (AddressingMode.ZERO_PAGE_X, 4),
+    0x7C: (AddressingMode.ABSOLUTE_X, 4),
+    0xD4: (AddressingMode.ZERO_PAGE_X, 4),
+    0xDC: (AddressingMode.ABSOLUTE_X, 4),
+    0xF4: (AddressingMode.ZERO_PAGE_X, 4),
+    0xFC: (AddressingMode.ABSOLUTE_X, 4),
+}
+_UNDOCUMENTED_NOP_IMPLIED = frozenset({0x1A, 0x3A, 0x5A, 0x7A, 0xDA, 0xFA})
+_UNDOCUMENTED_NOP_IMMEDIATE = frozenset({0x80, 0x82, 0x89, 0xC2, 0xE2})
+_JAM_OPCODES = frozenset(
+    {0x02, 0x12, 0x22, 0x32, 0x42, 0x52, 0x62, 0x72, 0x92, 0xB2, 0xD2, 0xF2}
+)
+
+
 class UnsupportedOpcodeError(ValueError):
     """Raised when an opcode is not part of the documented NMOS 6502 set."""
 
@@ -333,6 +358,20 @@ def _build_opcode_catalog() -> Mapping[int, OpcodeDefinition]:
                 cycle,
                 mnemonic in page_penalty_mnemonics and mode in page_penalty_modes,
             )
+    for opcode in _UNDOCUMENTED_NOP_IMPLIED:
+        catalog[opcode] = OpcodeDefinition(opcode, "NOP", AddressingMode.IMPLIED, 2)
+    for opcode in _UNDOCUMENTED_NOP_IMMEDIATE:
+        catalog[opcode] = OpcodeDefinition(opcode, "NOP", AddressingMode.IMMEDIATE, 2)
+    for opcode, (mode, cycle) in _UNDOCUMENTED_NOP_ADDRESSING.items():
+        catalog[opcode] = OpcodeDefinition(
+            opcode,
+            "NOP",
+            mode,
+            cycle,
+            mode is AddressingMode.ABSOLUTE_X,
+        )
+    for opcode in _JAM_OPCODES:
+        catalog[opcode] = OpcodeDefinition(opcode, "JAM", AddressingMode.IMPLIED, 2)
     return MappingProxyType(catalog)
 
 
@@ -470,7 +509,7 @@ class CPU:
     devices.
     """
 
-    __slots__ = ("_memory", "_state", "_lines")
+    __slots__ = ("_memory", "_state", "_lines", "_halted", "_halt_opcode")
 
     def __init__(
         self,
@@ -488,6 +527,13 @@ class CPU:
         self._memory = memory
         self._lines = lines if lines is not None else InterruptLines()
         self._state = state if state is not None else CPUState()
+        self._halted = False
+        self._halt_opcode: int | None = None
+
+    @property
+    def halted(self) -> bool:
+        """Whether the processor has been permanently stopped by JAM."""
+        return self._halted
 
     @property
     def memory(self) -> MemoryBus:
@@ -765,6 +811,7 @@ class CPU:
 
     def _pop_status(self) -> None:
         self._state.status = unpack_status_byte(self._pop_byte())
+        self._state.status.break_flag = False
 
     def _read_vector(self, address: int) -> int:
         low = self._read_operand(address)
@@ -813,7 +860,29 @@ class CPU:
             setattr(self._state.status, flag, mnemonic in {"SEC", "SED", "SEI"})
             return definition.cycles
         if mnemonic == "NOP":
-            return definition.cycles
+            if definition.addressing_mode is not AddressingMode.IMPLIED:
+                result = self.resolve_addressing(definition.addressing_mode)
+                page_crossed = result.page_crossed
+            return definition.cycles + int(
+                definition.page_cross_penalty and page_crossed
+            )
+        if mnemonic == "JAM":
+            self._read_operand(self._state.pc.value)
+            for address in (
+                0xFFFF,
+                0xFFFE,
+                0xFFFE,
+                0xFFFF,
+                0xFFFF,
+                0xFFFF,
+                0xFFFF,
+                0xFFFF,
+                0xFFFF,
+            ):
+                self._read_operand(address)
+            self._halted = True
+            self._halt_opcode = definition.opcode
+            return 11
         if mnemonic == "JMP":
             result = self.resolve_addressing(definition.addressing_mode)
             if result.address is None:
@@ -1027,6 +1096,19 @@ class CPU:
         records the cycles supplied by the eventual instruction handler.
         """
         cycles = _require_cycles(cycles)
+        if self._halted:
+            boundary = self.sample_instruction_boundary()
+            total_cycles = self.record_cycles(0)
+            return InstructionStep(
+                context=InstructionContext(
+                    state=self._state,
+                    boundary=boundary,
+                    opcode_address=self._state.pc.value,
+                    opcode=self._halt_opcode if self._halt_opcode is not None else 0,
+                ),
+                cycles=0,
+                total_cycles=total_cycles,
+            )
         boundary = self.sample_instruction_boundary()
         if boundary.reset:
             return self._accept_reset(boundary)
