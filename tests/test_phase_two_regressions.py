@@ -306,3 +306,52 @@ def test_irq_held_during_nmi_is_accepted_after_rti():
     assert isinstance(irq, IRQStep)
     assert nmi.accepted_events == ("NMI",)
     assert irq.accepted_events == ("IRQ",)
+
+
+COMPOSITE_CASES = (
+    ("SLO", 0x07, 0x10, 0x81, False, 0x12, True, False, False),
+    ("RLA", 0x27, 0xF0, 0x80, True, 0x00, True, False, True),
+    ("SRE", 0x4F, 0xF0, 0x03, False, 0xF1, True, True, False),
+)
+
+
+@pytest.mark.parametrize(
+    "mnemonic,opcode,accumulator,memory,carry_in,expected,carry,negative,zero",
+    COMPOSITE_CASES,
+)
+def test_shift_alu_composites_apply_rmw_shift_then_alu(
+    mnemonic, opcode, accumulator, memory, carry_in, expected, carry, negative, zero
+):
+    state = CPUState(
+        accumulator=accumulator,
+        status=StatusFlags(carry=carry_in, overflow=True, decimal=True),
+    )
+    bus = Bus({0: opcode, 1: 0x20, 0x20: memory})
+
+    result = CPU(bus, state=state).step()
+
+    assert result.cycles == {"SLO": 5, "RLA": 5, "SRE": 6}[mnemonic]
+    assert state.a.value == expected
+    assert bus.values[0x20] == {"SLO": 0x02, "RLA": 0x01, "SRE": 0x01}[mnemonic]
+    assert state.status.carry is carry
+    assert state.status.negative is negative
+    assert state.status.zero is zero
+    assert state.status.overflow is True
+
+
+def test_rra_uses_shift_carry_as_adc_carry_and_preserves_decimal_behavior():
+    state = CPUState(
+        accumulator=0x49,
+        status=StatusFlags(decimal=True, carry=True),
+    )
+    bus = Bus({0: 0x67, 1: 0x20, 0x20: 0x01})
+
+    result = CPU(bus, state=state).step()
+
+    assert result.cycles == 5
+    assert state.a.value == 0x30
+    assert state.status.carry is True
+    assert state.status.negative is True
+    assert state.status.overflow is False
+    assert state.status.zero is False
+    assert bus.values[0x20] == 0x80
