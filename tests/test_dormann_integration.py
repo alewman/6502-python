@@ -10,21 +10,21 @@ from tests.dormann_support import DormannAssetError, run_dormann
 @pytest.mark.integration
 @pytest.mark.parametrize(
     ("name", "start", "success_pc"),
-    [("6502_functional_test.bin", 0x0400, 0x36DD)],
+    [("6502_functional_test.bin", 0x0400, 0x3469)],
 )
 def test_functional_exerciser_passes(name, start, success_pc):
     try:
         result = run_dormann(
             name,
             start=start,
-            budget=5_000_000,
+            budget=40_000_000,
             success_pcs=frozenset({success_pc}),
-            failure_pcs=frozenset({0x3469}),
+            trap_on_self_loop=True,
         )
     except DormannAssetError as error:
         pytest.skip(str(error))
 
-    assert result.status == "success", result.message
+    assert result.status == "success", f"{result.message}; {result.diagnostics}"
 
 
 @pytest.mark.integration

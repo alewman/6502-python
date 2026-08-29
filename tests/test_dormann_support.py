@@ -90,3 +90,44 @@ def test_runner_reports_instruction_budget_exhaustion(monkeypatch):
     assert result.steps == 2
     assert result.pc == 0x0400
     assert "2-instruction budget" in result.message
+
+
+def test_runner_traps_an_unexpected_self_loop_when_requested(monkeypatch):
+    """Dormann images signal every outcome with `jmp *`, so a stuck PC is a verdict."""
+    memory = VectorMemory()
+    memory.bytes.update({0x0400: 0x4C, 0x0401: 0x00, 0x0402: 0x04})
+    monkeypatch.setattr(
+        support, "load_dormann_binary", lambda name, load_address=0: memory
+    )
+
+    result = support.run_dormann(
+        "synthetic.bin",
+        start=0x0400,
+        budget=1_000_000,
+        success_pcs=frozenset({0x1234}),
+        trap_on_self_loop=True,
+    )
+
+    assert result.status == "failure"
+    assert result.pc == 0x0400
+    assert "unexpected self-loop trap" in result.message
+    # Fails immediately rather than grinding out the whole budget.
+    assert result.steps == 1
+
+
+def test_runner_accepts_a_declared_success_self_loop(monkeypatch):
+    memory = VectorMemory()
+    memory.bytes.update({0x0400: 0x4C, 0x0401: 0x00, 0x0402: 0x04})
+    monkeypatch.setattr(
+        support, "load_dormann_binary", lambda name, load_address=0: memory
+    )
+
+    result = support.run_dormann(
+        "synthetic.bin",
+        start=0x0400,
+        budget=1_000_000,
+        success_pcs=frozenset({0x0400}),
+        trap_on_self_loop=True,
+    )
+
+    assert result.status == "success"
