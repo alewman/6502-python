@@ -237,6 +237,32 @@ _OPCODE_ROWS = (
         "ABSOLUTE_Y ABSOLUTE_X",
         "8 5 6 8 6 7 7",
     ),
+    (
+        "83 87 8F 97",
+        "SAX",
+        "INDEXED_INDIRECT ZERO_PAGE ABSOLUTE ZERO_PAGE_Y",
+        "6 3 4 4",
+    ),
+    (
+        "A3 A7 AF B3 B7 BF",
+        "LAX",
+        "INDEXED_INDIRECT ZERO_PAGE ABSOLUTE INDIRECT_INDEXED ZERO_PAGE_Y ABSOLUTE_Y",
+        "6 3 4 5 4 4",
+    ),
+    (
+        "C3 C7 CF D3 D7 DB DF",
+        "DCP",
+        "INDEXED_INDIRECT ZERO_PAGE ABSOLUTE INDIRECT_INDEXED ZERO_PAGE_X "
+        "ABSOLUTE_Y ABSOLUTE_X",
+        "8 5 6 8 6 7 7",
+    ),
+    (
+        "E3 E7 EF F3 F7 FB FF",
+        "ISC",
+        "INDEXED_INDIRECT ZERO_PAGE ABSOLUTE INDIRECT_INDEXED ZERO_PAGE_X "
+        "ABSOLUTE_Y ABSOLUTE_X",
+        "8 5 6 8 6 7 7",
+    ),
     ("00", "BRK", "IMPLIED", "7"),
     ("90", "BCC", "RELATIVE", "2"),
     ("B0", "BCS", "RELATIVE", "2"),
@@ -364,6 +390,7 @@ def _build_opcode_catalog() -> Mapping[int, OpcodeDefinition]:
         "LDA",
         "LDX",
         "LDY",
+        "LAX",
         "ORA",
         "SBC",
     }
@@ -981,6 +1008,50 @@ class CPU:
                 }[mnemonic]
                 self._state.a.value = value
                 self._update_nz(value)
+        elif mnemonic == "SAX":
+            result = self.resolve_addressing(
+                definition.addressing_mode, read_operand=False
+            )
+            if result.address is None:
+                raise ValueError("SAX requires a memory address")
+            self._memory.write_byte(
+                result.address, self._state.a.value & self._state.x.value
+            )
+        elif mnemonic == "LAX":
+            result = self.resolve_addressing(definition.addressing_mode)
+            page_crossed = result.page_crossed
+            if result.operand is None:
+                raise ValueError("LAX requires an operand")
+            self._state.a.value = result.operand
+            self._state.x.value = result.operand
+            self._update_nz(result.operand)
+        elif mnemonic in {"DCP", "ISC"}:
+            result = self.resolve_addressing(definition.addressing_mode)
+            if result.address is None or result.operand is None:
+                raise ValueError(f"{mnemonic} requires a memory operand")
+            value = (
+                (result.operand + 1) & 0xFF
+                if mnemonic == "ISC"
+                else (result.operand - 1) & 0xFF
+            )
+            self._memory.write_byte(result.address, result.operand)
+            self._memory.write_byte(result.address, value)
+            if mnemonic == "DCP":
+                difference = (self._state.a.value - value) & 0xFF
+                self._state.status.carry = self._state.a.value >= value
+                self._update_nz(difference)
+            else:
+                value, carry, negative, overflow, zero = _sbc_result(
+                    self._state.a.value,
+                    value,
+                    self._state.status.carry,
+                    self._state.status.decimal,
+                )
+                self._state.a.value = value
+                self._state.status.carry = carry
+                self._state.status.negative = negative
+                self._state.status.overflow = overflow
+                self._state.status.zero = zero
         elif mnemonic in {"CMP", "CPX", "CPY"}:
             result = self.resolve_addressing(definition.addressing_mode)
             page_crossed = result.page_crossed
