@@ -16,7 +16,6 @@ from sixfiveohtwo import (
 from sixfiveohtwo.core import (
     OpcodeDefinition,
     ResetStep,
-    UnsupportedOpcodeError,
     _normalize_byte_address,
     _normalize_word_address,
 )
@@ -806,16 +805,12 @@ def test_step_routes_an_official_opcode_to_addressing_metadata():
 
 
 @pytest.mark.parametrize("opcode", [0x02, 0xFF])
-def test_step_rejects_unsupported_opcodes_deterministically(opcode):
+def test_step_executes_previously_unsupported_opcodes(opcode):
     memory = HostMemory()
     memory.bytes[0] = opcode
     cpu = CPU(memory)
 
-    with pytest.raises(
-        UnsupportedOpcodeError,
-        match=rf"unsupported or unofficial opcode: 0x{opcode:02X}",
-    ):
-        cpu.step()
+    result = cpu.step()
 
-    assert cpu.state.pc.value == 1
-    assert cpu.state.cycles == 0
+    assert result.opcode == opcode
+    assert cpu.state.cycles > 0

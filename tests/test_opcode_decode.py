@@ -4,13 +4,12 @@ from sixfiveohtwo import AddressingMode
 from sixfiveohtwo.core import (
     OFFICIAL_OPCODES,
     OpcodeDefinition,
-    UnsupportedOpcodeError,
     decode_opcode,
 )
 
 
-def test_catalog_is_canonical_and_covers_every_official_encoding():
-    assert len(OFFICIAL_OPCODES) == 242
+def test_catalog_is_canonical_and_covers_every_encoding():
+    assert set(OFFICIAL_OPCODES) == set(range(0x100))
     assert decode_opcode(0xA9) is OFFICIAL_OPCODES[0xA9]
     assert decode_opcode(0xA9) == OpcodeDefinition(
         0xA9, "LDA", AddressingMode.IMMEDIATE, 2
@@ -27,9 +26,13 @@ def test_decode_exposes_instruction_length_and_page_penalty_metadata():
 
 
 @pytest.mark.parametrize("opcode", [0x0B])
-def test_decode_rejects_unofficial_opcodes(opcode):
-    with pytest.raises(UnsupportedOpcodeError):
-        decode_opcode(opcode)
+def test_decode_accepts_previously_unofficial_opcodes(opcode):
+    assert decode_opcode(opcode).opcode == opcode
+
+
+def test_decode_accepts_every_opcode_byte():
+    decoded = [decode_opcode(opcode).opcode for opcode in range(0x100)]
+    assert decoded == list(range(0x100))
 
 
 @pytest.mark.parametrize("opcode", [True, "A9", -1, 0x100])
