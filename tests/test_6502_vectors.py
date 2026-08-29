@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 from sixfiveohtwo import pack_status_byte
-from sixfiveohtwo.core import OFFICIAL_OPCODES
 from tests.vector_support import adapt_vector, iter_vector_file
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -43,21 +42,8 @@ _SOURCES = _vector_files()
 
 
 def _file_case(path: Path) -> pytest.ParameterSet:
-    """Build one file's test param, xfailing unofficial opcodes per documented scope."""
+    """Build one file's test parameter."""
     file_id = f"vector:6502/{path.relative_to(_VECTOR_ROOT.resolve()).as_posix()}"
-    try:
-        opcode = int(path.stem, 16)
-    except ValueError:
-        return pytest.param(path, id=file_id)
-    if opcode not in OFFICIAL_OPCODES:
-        return pytest.param(
-            path,
-            id=file_id,
-            marks=pytest.mark.xfail(
-                reason="unofficial/illegal opcode; excluded per README/phase 3 scope",
-                strict=False,
-            ),
-        )
     return pytest.param(path, id=file_id)
 
 

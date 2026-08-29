@@ -104,7 +104,8 @@ This project is an **embeddable instruction core**, not a complete computer or
 console emulator. The v1 target is the original NMOS 6502 instruction set,
 operating against host-provided memory and interrupt lines.
 
-The planned official opcode scope covers all documented NMOS 6502 instructions:
+The pure-Python NMOS 6502 core covers all 256 NMOS 6502 opcodes, including
+documented and undocumented instructions:
 ADC, AND, ASL, BCC, BCS, BEQ, BIT, BMI, BNE, BPL, BRK, BVC, BVS, CLC, CLD,
 CLI, CLV, CMP, CPX, CPY, DEC, DEX, DEY, EOR, INC, INX, INY, JMP, JSR, LDA,
 LDX, LDY, LSR, NOP, ORA, PHA, PHP, PLA, PLP, ROL, ROR, RTI, RTS, SBC, SEC,
@@ -121,7 +122,6 @@ surrounding hardware behaves identically.
 
 The v1 core explicitly does **not** provide or emulate:
 
-- unofficial/undocumented opcodes;
 - 65C02 or 65816 instructions, extensions, or behavior;
 - memory maps or machine-specific host machines;
 - cartridges or other devices; or
@@ -150,8 +150,9 @@ the corpus present, the runner executes all JSON records and checks cycle
 counts, A/X/Y/PC/SP, the packed status byte and persistent flags, sparse final
 RAM, and memory mutations.
 
-This validates instruction-core behavior, not cycle-accurate bus pins or a
-complete host machine. It does not establish correctness for machine-specific
-maps/devices, host-bus integration, undocumented opcodes, or other CPU variants.
+This validates instruction-core behavior for all 256 NMOS 6502 opcodes, not
+cycle-accurate bus pins or a complete host machine. It does not establish
+correctness for machine-specific maps/devices, host-bus integration, or other
+CPU variants.
 See [the detailed validation documentation](docs/validation.md) for scope and
 provenance.
