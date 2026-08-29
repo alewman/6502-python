@@ -62,10 +62,10 @@ informative skip. To run the non-integration suite, use `pytest -m "not integrat
 The tests execute one instruction per public `CPU.step()` call in a fresh,
 64 KiB machine-neutral memory, with no network access or environment-variable
 switch. The functional test loads the image at `$0000`, starts at `$0400`, and
-has a 5,000,000-instruction budget. Its documented success convention is the
-persistent `$3469` self-loop; any other persistent loop is a failure trap. The
-harness also recognizes `$36DD` as its success target when returned by the
-selected functional image.
+has a 40,000,000-instruction budget. Its success convention is the persistent
+`$3469` self-loop; any other persistent self-loop is a failure trap and is
+reported immediately rather than exhausting the budget. A full passing run of
+the pinned image executes 30,646,177 instructions and 96,241,367 cycles.
 
 The decimal test loads `tests/dormann/6502_decimal_test.bin` at `$0000`, starts
 at `$0400` (the embedded RESET-vector target), and has a 20,000,000-instruction

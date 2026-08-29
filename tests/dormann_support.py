@@ -90,8 +90,14 @@ def run_dormann(
     diagnostic_memory_addresses: frozenset[int] = frozenset(),
     load_address: int = 0,
     asset: bool = False,
+    trap_on_self_loop: bool = False,
 ) -> DormannRun:
-    """Execute one instruction per public ``CPU.step`` call until a trap."""
+    """Execute one instruction per public ``CPU.step`` call until a trap.
+
+    Dormann images signal every outcome with a persistent ``jmp *``.  With
+    ``trap_on_self_loop`` set, any self-loop that is not a declared success is
+    reported immediately instead of grinding out the whole instruction budget.
+    """
     if budget <= 0:
         raise ValueError("budget must be positive")
     if not 0 <= start <= 0xFFFF:
@@ -118,15 +124,16 @@ def run_dormann(
             + (f"; memory: {values}" if values else "")
         )
 
+    def failed_marker() -> bool:
+        return any(
+            memory.read_byte(address) != 0 for address in failure_memory_addresses
+        )
+
+    previous_pc = start
     for steps in range(1, budget + 1):
         cpu.step()
         pc = cpu.state.pc.value
-        if pc in failure_pcs or (
-            pc in success_pcs
-            and any(
-                memory.read_byte(address) != 0 for address in failure_memory_addresses
-            )
-        ):
+        if pc in failure_pcs or (pc in success_pcs and failed_marker()):
             detail = "failure trap" if pc in failure_pcs else "failure marker"
             return DormannRun(
                 "failure",
@@ -143,6 +150,15 @@ def run_dormann(
                 f"Dormann {name} passed at 0x{pc:04X}",
                 diagnostics(),
             )
+        if trap_on_self_loop and pc == previous_pc:
+            return DormannRun(
+                "failure",
+                steps,
+                pc,
+                f"Dormann {name} stopped on an unexpected self-loop trap at 0x{pc:04X}",
+                diagnostics(),
+            )
+        previous_pc = pc
     pc = cpu.state.pc.value
     return DormannRun(
         "budget",
