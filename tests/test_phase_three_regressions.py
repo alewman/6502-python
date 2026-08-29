@@ -1,4 +1,7 @@
+import pytest
+
 from sixfiveohtwo import CPU, CPUState, IndexRegisters, StatusFlags
+from sixfiveohtwo.core import OFFICIAL_OPCODES
 
 
 class Bus:
@@ -173,4 +176,88 @@ def test_decimal_adc_sets_carry_used_by_following_branch():
     assert state.pc.value == 0x000E
     assert state.status.carry is True
     assert state.status.decimal is True
+
+
+@pytest.mark.parametrize(
+    ("mnemonic", "opcodes"),
+    [
+        ("SAX", (0x83, 0x87, 0x8F, 0x97)),
+        ("LAX", (0xA3, 0xA7, 0xAF, 0xB3, 0xB7, 0xBF)),
+        ("DCP", (0xC3, 0xC7, 0xCF, 0xD3, 0xD7, 0xDB, 0xDF)),
+        ("ISC", (0xE3, 0xE7, 0xEF, 0xF3, 0xF7, 0xFB, 0xFF)),
+    ],
+)
+def test_load_store_compare_catalog_contains_all_composite_encodings(mnemonic, opcodes):
+    definitions = [
+        definition
+        for definition in OFFICIAL_OPCODES.values()
+        if definition.mnemonic == mnemonic
+    ]
+    assert {definition.opcode for definition in definitions} == set(opcodes)
+
+
+def test_sax_stores_a_and_x_intersection_without_changing_flags():
+    state = CPUState(
+        accumulator=0xCD,
+        index=IndexRegisters(x=0x6F),
+        status=StatusFlags(negative=True, overflow=True, decimal=True, carry=True),
+    )
+    bus = Bus({0: 0x97, 1: 0x20})
+
+    result = CPU(bus, state=state).step()
+
+    assert result.cycles == 4
+    assert bus.values[0x20] == 0x4D
+    assert state.status == StatusFlags(
+        negative=True, overflow=True, decimal=True, carry=True
+    )
+
+
+def test_lax_indexed_indirect_loads_a_and_x_and_updates_nz():
+    bus = Bus({0: 0xB3, 1: 0x20, 0x20: 0x00, 0x21: 0x21, 0x2101: 0x80})
+    state = CPUState(index=IndexRegisters(y=1))
+
+    result = CPU(bus, state=state).step()
+
+    assert result.cycles == 5
+    assert state.a.value == state.x.value == 0x80
+    assert state.status.negative is True
     assert state.status.zero is False
+
+
+@pytest.mark.parametrize(
+    ("opcode", "initial", "expected", "cycles"),
+    [(0xC7, 0x00, 0xFF, 5), (0xDF, 0x00, 0xFF, 7)],
+)
+def test_dcp_decrements_memory_then_compares_without_changing_accumulator(
+    opcode, initial, expected, cycles
+):
+    address_bytes = (0x20,) if opcode == 0xC7 else (0xFF, 0x20)
+    address = 0x20 if opcode == 0xC7 else 0x2100
+    bus = Bus({0: opcode, **dict(enumerate(address_bytes, start=1)), address: initial})
+    state = CPUState(accumulator=0xFF, index=IndexRegisters(x=1))
+
+    result = CPU(bus, state=state).step()
+
+    assert result.cycles == cycles
+    assert state.a.value == 0xFF
+    assert bus.values[address] == expected
+    assert bus.operations[-2:] == [
+        ("write", address, initial),
+        ("write", address, expected),
+    ]
+    assert state.status.carry is True
+    assert state.status.zero is True
+
+
+def test_isc_increments_memory_then_subtracts_with_sbc_flags():
+    bus = Bus({0: 0xE7, 1: 0x20, 0x20: 0x0F})
+    state = CPUState(accumulator=0x10, status=StatusFlags(carry=True))
+
+    result = CPU(bus, state=state).step()
+
+    assert result.cycles == 5
+    assert bus.values[0x20] == 0x10
+    assert state.a.value == 0x00
+    assert state.status.carry is True
+    assert state.status.zero is True
