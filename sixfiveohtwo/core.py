@@ -209,6 +209,34 @@ _OPCODE_ROWS = (
         "ACCUMULATOR ZERO_PAGE ZERO_PAGE_X ABSOLUTE ABSOLUTE_X",
         "2 5 6 6 7",
     ),
+    (
+        "03 07 0F 13 17 1B 1F",
+        "SLO",
+        "INDEXED_INDIRECT ZERO_PAGE ABSOLUTE INDIRECT_INDEXED ZERO_PAGE_X "
+        "ABSOLUTE_Y ABSOLUTE_X",
+        "8 5 6 8 6 7 7",
+    ),
+    (
+        "23 27 2F 33 37 3B 3F",
+        "RLA",
+        "INDEXED_INDIRECT ZERO_PAGE ABSOLUTE INDIRECT_INDEXED ZERO_PAGE_X "
+        "ABSOLUTE_Y ABSOLUTE_X",
+        "8 5 6 8 6 7 7",
+    ),
+    (
+        "43 47 4F 53 57 5B 5F",
+        "SRE",
+        "INDEXED_INDIRECT ZERO_PAGE ABSOLUTE INDIRECT_INDEXED ZERO_PAGE_X "
+        "ABSOLUTE_Y ABSOLUTE_X",
+        "8 5 6 8 6 7 7",
+    ),
+    (
+        "63 67 6F 73 77 7B 7F",
+        "RRA",
+        "INDEXED_INDIRECT ZERO_PAGE ABSOLUTE INDIRECT_INDEXED ZERO_PAGE_X "
+        "ABSOLUTE_Y ABSOLUTE_X",
+        "8 5 6 8 6 7 7",
+    ),
     ("00", "BRK", "IMPLIED", "7"),
     ("90", "BCC", "RELATIVE", "2"),
     ("B0", "BCS", "RELATIVE", "2"),
@@ -966,19 +994,38 @@ class CPU:
             difference = (register.value - result.operand) & 0xFF
             self._state.status.carry = register.value >= result.operand
             self._update_nz(difference)
-        elif mnemonic in {"ASL", "LSR", "ROL", "ROR"}:
+        elif mnemonic in {
+            "ASL",
+            "LSR",
+            "ROL",
+            "ROR",
+            "SLO",
+            "RLA",
+            "SRE",
+            "RRA",
+        }:
             result = self.resolve_addressing(definition.addressing_mode)
             if result.operand is None:
                 raise ValueError(f"{mnemonic} requires an operand")
             value = result.operand
             carry_in = int(self._state.status.carry)
-            if mnemonic == "ASL":
+            shift = {
+                "ASL": "ASL",
+                "SLO": "ASL",
+                "ROL": "ROL",
+                "RLA": "ROL",
+                "LSR": "LSR",
+                "SRE": "LSR",
+                "ROR": "ROR",
+                "RRA": "ROR",
+            }[mnemonic]
+            if shift == "ASL":
                 self._state.status.carry = bool(value & 0x80)
                 shifted = value << 1
-            elif mnemonic == "LSR":
+            elif shift == "LSR":
                 self._state.status.carry = bool(value & 0x01)
                 shifted = value >> 1
-            elif mnemonic == "ROL":
+            elif shift == "ROL":
                 self._state.status.carry = bool(value & 0x80)
                 shifted = (value << 1) | carry_in
             else:
@@ -990,7 +1037,31 @@ class CPU:
             else:
                 self._memory.write_byte(result.address, result.operand)
                 self._memory.write_byte(result.address, value)
-            self._update_nz(value)
+            if mnemonic in {"SLO", "RLA", "SRE", "RRA"}:
+                if mnemonic == "SLO":
+                    value = self._state.a.value | value
+                elif mnemonic == "RLA":
+                    value = self._state.a.value & value
+                elif mnemonic == "SRE":
+                    value = self._state.a.value ^ value
+                else:
+                    value, carry, negative, overflow, zero = _adc_result(
+                        self._state.a.value,
+                        value,
+                        self._state.status.carry,
+                        self._state.status.decimal,
+                    )
+                    self._state.status.carry = carry
+                    self._state.status.negative = negative
+                    self._state.status.overflow = overflow
+                    self._state.status.zero = zero
+                if mnemonic != "RRA":
+                    self._state.a.value = value
+                    self._update_nz(value)
+                else:
+                    self._state.a.value = value
+            else:
+                self._update_nz(value)
         elif mnemonic in {"INC", "DEC"}:
             result = self.resolve_addressing(definition.addressing_mode)
             if result.address is None or result.operand is None:
