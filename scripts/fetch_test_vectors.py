@@ -70,6 +70,8 @@ def _extract_source(archive: Path, destination: Path) -> None:
             relative_parts = _source_member_path(member)
             if relative_parts is None:
                 continue
+            if member.isdir():
+                continue
             if not member.isfile():
                 raise RuntimeError(
                     f"expected regular files under {SOURCE_DIRECTORY!r}; "

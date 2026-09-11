@@ -18,13 +18,22 @@ FUNCTIONAL_ARCHIVE_URL = (
     f"{FUNCTIONAL_REPOSITORY_URL}/archive/{FUNCTIONAL_REVISION}.tar.gz"
 )
 FUNCTIONAL_MEMBER = "bin_files/6502_functional_test.bin"
-FUNCTIONAL_SHA256 = "fa12bfc761e6f9057e4cc01a665a7b800ff01ae91f598af1e39a1201d01953f"
+FUNCTIONAL_SHA256 = "fa12bfc761e6f9057e4cc01a665a7b800ff01ae91f598af1e39a1201d01953fd"
 
 DECIMAL_REPOSITORY_URL = "https://github.com/amb5l/6502_65C02_functional_tests"
 DECIMAL_REVISION = "966b1a35049f9d8be44ad092ec6d43d5ba1831b3"
 DECIMAL_ARCHIVE_URL = f"{DECIMAL_REPOSITORY_URL}/archive/{DECIMAL_REVISION}.tar.gz"
-DECIMAL_SOURCE_MEMBERS = ("6502_decimal_test.ca65", "example.cfg")
-DECIMAL_SHA256 = "b179ca4c5a305de2d0cde9ccaa04861be965e2a85b9d3d1230dcc47a396ca43"
+# The ca65 sources live under a "ca65/" directory in the pinned archive.
+DECIMAL_SOURCE_DIRECTORY = "ca65"
+DECIMAL_SOURCE_MEMBERS = (
+    f"{DECIMAL_SOURCE_DIRECTORY}/6502_decimal_test.ca65",
+    f"{DECIMAL_SOURCE_DIRECTORY}/example.cfg",
+)
+# The decimal binary is assembled locally, and its digest legitimately varies
+# with the cc65 version. Leave this unset rather than claiming an integrity
+# value we cannot verify -- the same stance fetch_test_vectors.py takes for
+# the unsigned GitHub archive. The pinned DECIMAL_REVISION is the real anchor.
+DECIMAL_SHA256: str | None = None
 
 DESTINATION = Path("tests") / "dormann"
 FUNCTIONAL_DESTINATION = DESTINATION / "bin_files" / "6502_functional_test.bin"
@@ -122,6 +131,7 @@ def _install(staged: Path, target: Path) -> None:
 
 
 def _build_decimal(source: Path, output: Path) -> bool:
+    source = source / DECIMAL_SOURCE_DIRECTORY
     ca65 = shutil.which("ca65")
     ld65 = shutil.which("ld65")
     if ca65 is None or ld65 is None:
@@ -169,7 +179,7 @@ def _build_decimal(source: Path, output: Path) -> bool:
             check=True,
         )
         digest = _sha256(built)
-        if digest != DECIMAL_SHA256:
+        if DECIMAL_SHA256 is not None and digest != DECIMAL_SHA256:
             print(
                 f"warning: decimal binary checksum differs: expected {DECIMAL_SHA256}, "
                 f"got {digest}; "

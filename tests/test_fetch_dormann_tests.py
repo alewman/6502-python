@@ -47,9 +47,14 @@ def _functional_archive(contents):
 
 def _decimal_archive():
     prefix = f"6502_65C02_functional_tests-{fetch_dormann_tests.DECIMAL_REVISION}"
+    # Mirror the real pinned archive, which keeps the ca65 sources in their own
+    # directory. A fixture shaped to match the code instead of the upstream
+    # archive is why the flat-layout bug survived review.
     return _archive(
-        (f"{prefix}/6502_decimal_test.ca65", "source"),
-        (f"{prefix}/example.cfg", "configuration"),
+        *(
+            (f"{prefix}/{member}", "source")
+            for member in fetch_dormann_tests.DECIMAL_SOURCE_MEMBERS
+        )
     )
 
 
@@ -197,3 +202,25 @@ def test_fetch_rejects_mismatched_functional_checksum(tmp_path, monkeypatch):
         fetch_dormann_tests.fetch_tests()
 
     assert not (tmp_path / fetch_dormann_tests.FUNCTIONAL_DESTINATION).exists()
+
+
+def test_pinned_digests_are_well_formed_sha256_values():
+    """A digest of the wrong length can never match, so it verifies nothing.
+
+    Both constants shipped 63 characters long and silently made the functional
+    exerciser unfetchable. Every test that touched them monkeypatched a valid
+    stand-in, so nothing ever measured the real values.
+    """
+    for name in ("FUNCTIONAL_SHA256", "DECIMAL_SHA256"):
+        digest = getattr(fetch_dormann_tests, name)
+        if digest is None:
+            continue  # Explicitly unclaimed beats a value nobody can verify.
+        assert len(digest) == 64, f"{name} is {len(digest)} chars; SHA-256 is 64"
+        assert set(digest) <= set("0123456789abcdef"), f"{name} is not lowercase hex"
+
+
+def test_pinned_revisions_are_well_formed_git_object_names():
+    for name in ("FUNCTIONAL_REVISION", "DECIMAL_REVISION"):
+        revision = getattr(fetch_dormann_tests, name)
+        assert len(revision) == 40, f"{name} is {len(revision)} chars; a SHA-1 is 40"
+        assert set(revision) <= set("0123456789abcdef"), f"{name} is not lowercase hex"
