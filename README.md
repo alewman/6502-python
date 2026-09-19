@@ -2,7 +2,9 @@
 
 `6502-python` is a dependency-free Python 3.12+ NMOS 6502 core package. The
 project distribution name is `6502-python`; import it in Python as
-`sixfiveohtwo`.
+`sixfiveohtwo`. It follows the shape and contract of
+[z80-python](https://github.com/alewman/z80-python), the family's reference
+core.
 
 ## Installation
 
