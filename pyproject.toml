@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
 name = "6502-python"
-version = "0.1.0"
+version = "0.2.0.dev0"
 description = "Readable, pure-Python NMOS 6502 instruction-core reference implementation"
 readme = "README.md"
 # The floor is the newest Python PyPy supports (3.11 as of PyPy 7.3.23); raise it when PyPy does.
@@ -35,19 +35,38 @@ Issues = "https://github.com/alewman/6502-python/issues"
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
-    "ruff>=0.15",
+    # Pinned: `ruff format --check` in CI must see the formatter the tree was formatted with.
+    "ruff==0.16.8",
 ]
 
+[project.scripts]
+sixfiveohtwo = "sixfiveohtwo.__main__:main"
+
 [tool.hatch.build.targets.wheel]
-packages = ["sixfiveohtwo"]
+packages = ["src/sixfiveohtwo"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["tests/6502_test_vectors", "tests/dormann"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "C4", "SIM", "PERF", "RUF"]
+# MOS's flag names are single capitals (N V B D I Z C), which ruff mistakes
+# for ambiguous names (E741).
+ignore = ["E741"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["sixfiveohtwo"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["integration: opt-in execution of externally provisioned Dormann binaries"]
-
-[tool.ruff]
-target-version = "py311"
-line-length = 88
-
-[tool.ruff.lint]
-select = ["E", "F", "I"]
+addopts = "--strict-markers -ra"
+pythonpath = ["src", "."]
+markers = [
+    "slow: a whole external-oracle corpus run; `pytest -m \"not slow\"` is the quick loop",
+]

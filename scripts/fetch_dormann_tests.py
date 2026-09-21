@@ -14,9 +14,7 @@ from urllib.request import urlopen
 
 FUNCTIONAL_REPOSITORY_URL = "https://github.com/Klaus2m5/6502_65C02_functional_tests"
 FUNCTIONAL_REVISION = "7954e2dbb49c469ea286070bf46cdd71aeb29e4b"
-FUNCTIONAL_ARCHIVE_URL = (
-    f"{FUNCTIONAL_REPOSITORY_URL}/archive/{FUNCTIONAL_REVISION}.tar.gz"
-)
+FUNCTIONAL_ARCHIVE_URL = f"{FUNCTIONAL_REPOSITORY_URL}/archive/{FUNCTIONAL_REVISION}.tar.gz"
 FUNCTIONAL_MEMBER = "bin_files/6502_functional_test.bin"
 FUNCTIONAL_SHA256 = "fa12bfc761e6f9057e4cc01a665a7b800ff01ae91f598af1e39a1201d01953fd"
 
@@ -29,11 +27,12 @@ DECIMAL_SOURCE_MEMBERS = (
     f"{DECIMAL_SOURCE_DIRECTORY}/6502_decimal_test.ca65",
     f"{DECIMAL_SOURCE_DIRECTORY}/example.cfg",
 )
-# The decimal binary is assembled locally, and its digest legitimately varies
-# with the cc65 version. Leave this unset rather than claiming an integrity
-# value we cannot verify -- the same stance fetch_test_vectors.py takes for
-# the unsigned GitHub archive. The pinned DECIMAL_REVISION is the real anchor.
-DECIMAL_SHA256: str | None = None
+# The decimal binary is assembled locally, so its digest can vary with the
+# cc65 version: a mismatch is a warning, not an error. This is the digest cc65's
+# V2.19 tag assembles (its ca65 reports "V2.18 - Git 5552824"), recorded
+# 2026-09-21 so a differing build is at least noticed. The pinned
+# DECIMAL_REVISION is the real anchor.
+DECIMAL_SHA256: str | None = "b179ca4c5a305de2d0cde9ccaa04861be965e2a85b9d3d1230dcc47a396ca43f"
 
 DESTINATION = Path("tests") / "dormann"
 FUNCTIONAL_DESTINATION = DESTINATION / "bin_files" / "6502_functional_test.bin"
@@ -64,13 +63,11 @@ def _member_path(name: str) -> tuple[str, ...] | None:
     return parts[1:]
 
 
-def _extract_members(
-    archive: Path, required: tuple[str, ...], destination: Path
-) -> None:
+def _extract_members(archive: Path, required: tuple[str, ...], destination: Path) -> None:
     required_set = set(required)
     found: set[str] = set()
     try:
-        bundle = tarfile.open(archive, "r:gz")
+        bundle = tarfile.open(archive, "r:gz")  # noqa: SIM115 - entered as `with bundle` below
     except (OSError, tarfile.TarError) as error:
         raise RuntimeError(f"unable to read downloaded archive: {error}") from error
 
@@ -123,9 +120,7 @@ def _install(staged: Path, target: Path) -> None:
             os.replace(backup, target)
         if temporary.exists():
             temporary.unlink()
-        raise OSError(
-            f"unable to install Dormann artifact at {target}: {error}"
-        ) from error
+        raise OSError(f"unable to install Dormann artifact at {target}: {error}") from error
     if backup.exists():
         backup.unlink()
 
@@ -135,9 +130,7 @@ def _build_decimal(source: Path, output: Path) -> bool:
     ca65 = shutil.which("ca65")
     ld65 = shutil.which("ld65")
     if ca65 is None or ld65 is None:
-        missing = ", ".join(
-            tool for tool, path in (("ca65", ca65), ("ld65", ld65)) if path is None
-        )
+        missing = ", ".join(tool for tool, path in (("ca65", ca65), ("ld65", ld65)) if path is None)
         print(
             f"skipping decimal-test provisioning: missing cc65 toolchain ({missing}); "
             "install cc65 (for example, apt install cc65) and run this script again",
@@ -145,9 +138,7 @@ def _build_decimal(source: Path, output: Path) -> bool:
         )
         return False
 
-    with tempfile.TemporaryDirectory(
-        prefix="dormann-decimal-", dir=source.parent
-    ) as work:
+    with tempfile.TemporaryDirectory(prefix="dormann-decimal-", dir=source.parent) as work:
         work_path = Path(work)
         object_file = work_path / "6502_decimal_test.o"
         listing_file = work_path / "6502_decimal_test.lst"
@@ -193,31 +184,24 @@ def _build_decimal(source: Path, output: Path) -> bool:
 def fetch_tests() -> tuple[Path, bool]:
     root = _project_root()
     (root / DESTINATION).mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(
-        prefix="fetch-", dir=root / DESTINATION
-    ) as temporary:
+    with tempfile.TemporaryDirectory(prefix="fetch-", dir=root / DESTINATION) as temporary:
         work = Path(temporary)
         functional_source = work / "functional"
         decimal_source = work / "decimal"
         functional_source.mkdir()
         decimal_source.mkdir()
         _download(FUNCTIONAL_ARCHIVE_URL, work / "functional.tar.gz")
-        _extract_members(
-            work / "functional.tar.gz", (FUNCTIONAL_MEMBER,), functional_source
-        )
+        _extract_members(work / "functional.tar.gz", (FUNCTIONAL_MEMBER,), functional_source)
         functional = functional_source / Path(*FUNCTIONAL_MEMBER.split("/"))
         digest = _sha256(functional)
         if digest != FUNCTIONAL_SHA256:
             raise RuntimeError(
-                "functional binary checksum mismatch: "
-                f"expected {FUNCTIONAL_SHA256}, got {digest}"
+                f"functional binary checksum mismatch: expected {FUNCTIONAL_SHA256}, got {digest}"
             )
         _install(functional, root / FUNCTIONAL_DESTINATION)
 
         _download(DECIMAL_ARCHIVE_URL, work / "decimal.tar.gz")
-        _extract_members(
-            work / "decimal.tar.gz", DECIMAL_SOURCE_MEMBERS, decimal_source
-        )
+        _extract_members(work / "decimal.tar.gz", DECIMAL_SOURCE_MEMBERS, decimal_source)
         decimal_ready = _build_decimal(decimal_source, work / "decimal.bin")
         if decimal_ready:
             _install(work / "decimal.bin", root / DECIMAL_DESTINATION)

@@ -32,9 +32,7 @@ def test_wheel_build_uses_hatchling_without_runtime_dependencies(tmp_path):
 
     with ZipFile(wheels[0]) as wheel:
         names = set(wheel.namelist())
-        metadata_name = next(
-            name for name in names if name.endswith(".dist-info/METADATA")
-        )
+        metadata_name = next(name for name in names if name.endswith(".dist-info/METADATA"))
         metadata = wheel.read(metadata_name).decode("utf-8")
 
     assert "sixfiveohtwo/__init__.py" in names
