@@ -51,10 +51,7 @@ def _decimal_archive():
     # directory. A fixture shaped to match the code instead of the upstream
     # archive is why the flat-layout bug survived review.
     return _archive(
-        *(
-            (f"{prefix}/{member}", "source")
-            for member in fetch_dormann_tests.DECIMAL_SOURCE_MEMBERS
-        )
+        *((f"{prefix}/{member}", "source") for member in fetch_dormann_tests.DECIMAL_SOURCE_MEMBERS)
     )
 
 
@@ -77,9 +74,7 @@ def _offline_project(tmp_path, monkeypatch, functional_archive):
     return requested
 
 
-def test_fetch_uses_immutable_revisions_and_project_relative_destinations(
-    tmp_path, monkeypatch
-):
+def test_fetch_uses_immutable_revisions_and_project_relative_destinations(tmp_path, monkeypatch):
     contents = b"functional test"
     monkeypatch.setattr(
         fetch_dormann_tests,
@@ -177,9 +172,7 @@ def test_fetch_rejects_missing_functional_artifact(tmp_path, monkeypatch):
     monkeypatch.setattr(
         fetch_dormann_tests,
         "urlopen",
-        lambda url, timeout: _ArchiveResponse(
-            _archive(("source/README.md", "no binary"))
-        ),
+        lambda url, timeout: _ArchiveResponse(_archive(("source/README.md", "no binary"))),
     )
 
     with pytest.raises(RuntimeError, match="archive is missing required member"):

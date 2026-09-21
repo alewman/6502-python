@@ -121,9 +121,7 @@ def test_fetch_vectors_rejects_malformed_archives_without_replacing_corpus(
 
 def test_main_reports_download_failure_actionably(monkeypatch, capsys):
     error = OSError("connection refused")
-    monkeypatch.setattr(
-        fetch_test_vectors, "fetch_vectors", lambda: (_ for _ in ()).throw(error)
-    )
+    monkeypatch.setattr(fetch_test_vectors, "fetch_vectors", lambda: (_ for _ in ()).throw(error))
 
     assert fetch_test_vectors.main() == 1
 
@@ -134,9 +132,7 @@ def test_main_reports_download_failure_actionably(monkeypatch, capsys):
 
 def test_main_reports_invalid_archive_actionably(monkeypatch, capsys):
     error = RuntimeError("archive does not contain JSON vectors under '6502'")
-    monkeypatch.setattr(
-        fetch_test_vectors, "fetch_vectors", lambda: (_ for _ in ()).throw(error)
-    )
+    monkeypatch.setattr(fetch_test_vectors, "fetch_vectors", lambda: (_ for _ in ()).throw(error))
 
     assert fetch_test_vectors.main() == 1
 
