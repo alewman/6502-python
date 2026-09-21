@@ -30,7 +30,7 @@ commit that introduced them and rerun on every commit since:
 
 | Gate | Command | Result | Time |
 | --- | --- | --- | --- |
-| SingleStepTests, full | `pytest -m slow tests/test_single_step_tests.py` | 2,560,000 / 2,560,000 cases, bus included | 33 s with both exercisers (PyPy) |
+| SingleStepTests, full | `pytest -m slow tests/test_single_step_tests.py` | 2,560,000 / 2,560,000 cases, bus included | 33 s with both exercisers (PyPy); 2 min 54 s (CPython 3.14) |
 | SingleStepTests, sample | `pytest -m "not slow"` | 100 cases x 256 opcodes | part of ~10 s |
 | Dormann functional | `pytest -m slow tests/test_dormann.py` | success trap `$3469` after 30,646,177 instructions | 4.6 s for both (PyPy) |
 | Dormann decimal | same | `ERROR` = 0 at the `$044B` trap | (above) |
