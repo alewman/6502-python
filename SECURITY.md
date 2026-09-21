@@ -2,16 +2,9 @@
 
 ## Supported versions
 
-This project is currently published as the 0.1.x alpha release line. Security
-fixes are provided for the latest released 0.1.x version only. Earlier 0.1.x
-releases, development checkouts, and unreleased commits are not supported; users
-should first upgrade to the current PyPI release.
-
-| Version | Supported |
-| --- | --- |
-| Latest 0.1.x release | Yes |
-| Earlier 0.1.x releases | No |
-| Unreleased development versions | No |
+`6502-python` has no published release yet; it is not on PyPI. Security fixes
+go to the `main` branch, and only `main` is supported. This section will
+name a release line once there is one.
 
 ## Reporting a vulnerability
 
