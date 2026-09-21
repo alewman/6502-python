@@ -27,11 +27,12 @@ DECIMAL_SOURCE_MEMBERS = (
     f"{DECIMAL_SOURCE_DIRECTORY}/6502_decimal_test.ca65",
     f"{DECIMAL_SOURCE_DIRECTORY}/example.cfg",
 )
-# The decimal binary is assembled locally, and its digest legitimately varies
-# with the cc65 version. Leave this unset rather than claiming an integrity
-# value we cannot verify -- the same stance fetch_test_vectors.py takes for
-# the unsigned GitHub archive. The pinned DECIMAL_REVISION is the real anchor.
-DECIMAL_SHA256: str | None = None
+# The decimal binary is assembled locally, so its digest can vary with the
+# cc65 version: a mismatch is a warning, not an error. This is the digest cc65's
+# V2.19 tag assembles (its ca65 reports "V2.18 - Git 5552824"), recorded
+# 2026-09-21 so a differing build is at least noticed. The pinned
+# DECIMAL_REVISION is the real anchor.
+DECIMAL_SHA256: str | None = "b179ca4c5a305de2d0cde9ccaa04861be965e2a85b9d3d1230dcc47a396ca43f"
 
 DESTINATION = Path("tests") / "dormann"
 FUNCTIONAL_DESTINATION = DESTINATION / "bin_files" / "6502_functional_test.bin"

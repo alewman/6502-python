@@ -10,3 +10,4 @@ build/
 # Dormann binaries and temporary source/build assets are fetched locally.
 /tests/dormann/
 .venv-pypy/
+reference/

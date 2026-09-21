@@ -1,161 +1,146 @@
 # 6502-python
 
-`6502-python` is a dependency-free NMOS 6502 core package. The
-project distribution name is `6502-python`; import it in Python as
-`sixfiveohtwo`. It follows the shape and contract of
-[z80-python](https://github.com/alewman/z80-python), the family's reference
-core.
-It runs on CPython 3.12+ and PyPy 3.11; CI tests CPython 3.12-3.14 and PyPy.
+[![CI](https://github.com/alewman/6502-python/actions/workflows/ci.yml/badge.svg)](https://github.com/alewman/6502-python/actions/workflows/ci.yml)
+[![Oracles](https://github.com/alewman/6502-python/actions/workflows/oracles.yml/badge.svg)](https://github.com/alewman/6502-python/actions/workflows/oracles.yml)
 
-## Installation
+A readable, pure-Python NMOS 6502 **instruction-core reference implementation**,
+correct to the bus cycle.
 
-Install the distribution from PyPI (or from a checkout containing this
-project):
+`6502-python` (imported as `sixfiveohtwo`) is a member of a family of cores
+built to one shape, whose reference is
+[z80-python](https://github.com/alewman/z80-python): the host passes its bus
+in as two callables, `step()` returns the cycles it took, registers are plain
+attributes, and the same debugger, disassembler and trace format sit beside
+the core. It implements all 256 NMOS 6502 opcodes, the 151 MOS documented and
+the 105 it did not, and makes every bus access the chip makes, in the chip's
+order, dummy reads and read-modify-write dummy writes included.
 
-```console
-python -m pip install 6502-python
-```
+The project is deliberately:
 
-The distribution name contains a hyphen, but the import package uses the flat
-module name `sixfiveohtwo`:
+- **readable** -- every instruction is an ordinary Python method; one table
+  routes each opcode to its method, and each method cites the page its rule
+  comes from;
+- **pure Python** -- no runtime dependencies; CPython 3.12+ and PyPy 3.11;
+- **independently validated** -- correctness claims come from external
+  oracles, each named with its tier;
+- **embeddable** -- a host passes in its memory as callables and decides
+  when the processor advances; and
+- **inspectable** -- CPU state capture, disassembly, a debugger with
+  breakpoints, watchpoints and bus-access tracking, structured traces, and
+  `python -m sixfiveohtwo` for stepping a binary.
 
-```python
-from sixfiveohtwo import CPU, InterruptLines
-```
+## Validation
 
-## Embedding
+Each oracle is named with its tier: where its expected values came from
+([oracle tiers](docs/validation.md#oracles-and-tiers)). The core passes:
 
-The host owns memory and supplies a byte-addressable object implementing
-`read_byte(address)` and `write_byte(address, value)`. The core does not
-allocate a memory map or provide machine-specific devices. For example, this
-is a complete in-memory host bus:
+- **self-checking programs:** Klaus Dormann's 6502 functional test (every
+  documented instruction and addressing mode, 30,646,177 instructions to its
+  success trap) and the decimal test (every ADC and SBC result and flag in
+  decimal mode, by NMOS rules), whose expected values their authors computed;
+- **emulator-derived:** the SingleStepTests 65x02 corpus, all 256 opcodes,
+  2,560,000 of 2,560,000 cases: registers, RAM, cycle count, and the address,
+  value and direction of every bus cycle;
+- **documentation:** MOS's programming and hardware manuals for the documented
+  instructions and their bus cycles, *No More Secrets* v0.99 for the
+  undocumented ones, the NESdev wiki for interrupt timing; every handler cites
+  its page, and `tests/test_readability.py` checks each page against the
+  document's own layout.
 
-```python
-class HostMemory:
-    def __init__(self):
-        self.data = bytearray(0x10000)
+Where the documents and the corpus disagree, the core's choice and the reason
+are listed in [docs/validation.md](docs/validation.md#divergences).
 
-    def read_byte(self, address):
-        if not 0 <= address <= 0xFFFF:
-            raise ValueError("address must fit in 16 bits")
-        return self.data[address]
+### CI coverage
 
-    def write_byte(self, address, value):
-        if not 0 <= address <= 0xFFFF:
-            raise ValueError("address must fit in 16 bits")
-        if not 0 <= value <= 0xFF:
-            raise ValueError("value must fit in 8 bits")
-        self.data[address] = value
+Every push runs the quick loop on CPython 3.12, 3.13, 3.14 and PyPy 3.11, ruff
+lint and format checks, a wheel build with an installed-package smoke test,
+and both Dormann exercisers (the decimal one assembled with cc65). The
+SingleStepTests corpus is ~420 MB, so the full sweep runs weekly and on
+demand in `oracles.yml`.
 
+## Install
 
-memory = HostMemory()
-lines = InterruptLines()
-cpu = CPU(memory, lines=lines)
-```
-
-`CPU` owns mutable register state in `cpu.state`; `cpu.memory` remains the
-host-provided bus and `cpu.lines` exposes the line object. A `CPUState` can
-also be supplied to `CPU(..., state=existing_state)` when the host needs to
-initialize or restore registers.
-
-### Reset and interrupt lines
-
-Drive RESET and IRQ as levels. They are reported whenever the host samples an
-instruction boundary, so keep them asserted for as long as required:
-
-```python
-cpu.set_reset(True)
-reset_sample = cpu.sample_instruction_boundary()
-cpu.set_reset(False)
-
-cpu.set_irq(True)
-irq_sample = cpu.sample_instruction_boundary()
-cpu.set_irq(False)
-```
-
-NMI is edge-latched. A low-to-high transition, or an explicit `signal_nmi()`
-call, creates one pending NMI indication. The indication is consumed by the
-next `sample_instruction_boundary()` call; drive NMI low before another rising
-edge can be recognized:
-
-```python
-cpu.set_nmi(True)  # latch one rising edge
-pending = cpu.pending_interrupt_boundary()  # inspect; does not consume NMI
-accepted = cpu.sample_instruction_boundary()  # accepted.nmi is True
-cpu.set_nmi(False)
-
-cpu.signal_nmi()  # latch without a persistent level
-accepted = cpu.sample_instruction_boundary()
-```
-
-`pending_interrupt_boundary()` returns the current RESET and IRQ levels and
-whether NMI is pending without consuming it. `sample_instruction_boundary()`
-returns an immutable `InterruptBoundary` and consumes the pending NMI flag.
-
-At an instruction boundary, `CPU.step()` accepts RESET first, then pending NMI,
-then an asserted IRQ when the interrupt-disable flag is clear. IRQ and NMI push
-PC and status (with B clear), set I, fetch their vectors, and account for seven
-cycles. A masked IRQ remains asserted and is deferred until interrupts are
-enabled. During a BRK sequence, an NMI sampled before vector fetch has priority
-for that vector: BRK still pushes its post-padding PC and B-set status, but the
-NMI vector is selected. The sequence remains seven cycles and reports its
-accepted event order as `("BRK", "NMI")`.
-
-## v1 scope and exclusions
-
-This project is an **embeddable instruction core**, not a complete computer or
-console emulator. The v1 target is the original NMOS 6502 instruction set,
-operating against host-provided memory and interrupt lines.
-
-The pure-Python NMOS 6502 core covers all 256 NMOS 6502 opcodes, including
-documented and undocumented instructions:
-ADC, AND, ASL, BCC, BCS, BEQ, BIT, BMI, BNE, BPL, BRK, BVC, BVS, CLC, CLD,
-CLI, CLV, CMP, CPX, CPY, DEC, DEX, DEY, EOR, INC, INX, INY, JMP, JSR, LDA,
-LDX, LDY, LSR, NOP, ORA, PHA, PHP, PLA, PLP, ROL, ROR, RTI, RTS, SBC, SEC,
-SED, SEI, STA, STX, STY, TAX, TAY, TSX, TXA, TXS, and TYA. Their documented
-addressing modes are in scope: accumulator, immediate, implied, relative,
-zero page, zero-page indexed (X or Y), absolute, absolute indexed (X or Y),
-indirect, indexed indirect (X), and indirect indexed (Y), where each mode is
-valid for the corresponding instruction.
-
-Decimal mode is intended to match NMOS 6502 behavior, including BCD ADC and
-SBC arithmetic and the NMOS-specific status-flag results. This is a fidelity
-target for the instruction core, rather than a claim that every host machine's
-surrounding hardware behaves identically.
-
-The v1 core explicitly does **not** provide or emulate:
-
-- 65C02 or 65816 instructions, extensions, or behavior;
-- memory maps or machine-specific host machines;
-- cartridges or other devices; or
-- cycle-accurate bus-pin activity or bus-pin timing claims.
-
-The host remains responsible for the memory and device environment around the
-core. See [Embedding](#embedding) for the host-memory and interrupt-line
-contract.
-
-## Validation with SingleStepTests
-
-The test suite can validate one-instruction NMOS 6502 behavior against the
-MIT-licensed [SingleStepTests 65x02 corpus](https://github.com/SingleStepTests/65x02),
-using immutable revision
-`2f6980a2d95757486c7bee24355c360e40e2a224` from the `SingleStepTests/65x02`
-repository. From the project root, fetch it with:
+Not yet on PyPI. Install from a checkout:
 
 ```console
-python scripts/fetch_test_vectors.py
+git clone https://github.com/alewman/6502-python
+cd 6502-python
+python -m pip install -e '.[dev]'
 ```
 
-The pinned corpus is stored at the gitignored project-relative path
-`tests/6502_test_vectors/6502/`. Pytest remains offline: it never fetches
-vectors, and missing local vectors produce a skip with the fetch command. With
-the corpus present, the runner executes all JSON records and checks cycle
-counts, A/X/Y/PC/SP, the packed status byte and persistent flags, sparse final
-RAM, and memory mutations.
+## Minimal host
 
-This validates instruction-core behavior for all 256 NMOS 6502 opcodes, not
-cycle-accurate bus pins or a complete host machine. It does not establish
-correctness for machine-specific maps/devices, host-bus integration, or other
-CPU variants.
-See [the detailed validation documentation](docs/validation.md) for scope and
-provenance.
+```python
+from sixfiveohtwo import MOS6502
+
+memory = bytearray(0x10000)
+cpu = MOS6502(memory.__getitem__, memory.__setitem__)  # read_byte, write_byte
+memory[0x0200:0x0203] = bytes((0xA9, 0x2A, 0xE8))  # LDA #$2A; INX
+cpu.pc = 0x0200
+assert cpu.step() == 2
+assert cpu.step() == 2
+assert (cpu.a, cpu.x) == (0x2A, 1)
+```
+
+This is the embedding contract of the whole family: z80-python and
+m6800-python take their bus the same way. The core always passes a 16-bit
+address and an 8-bit value, and calls the bus exactly once per cycle it
+returns, so a memory-mapped device sees each read and write the real chip
+would make -- including the dummy read of an I/O register that acknowledges
+it. [Start here](docs/start-here.md) has the rest; `examples/minimal_host.py`
+is a runnable host that boots through the reset vector.
+
+Until 0.2.0 the CPU took one object with both methods; passing one now raises
+a `TypeError` naming the new form. See [CHANGELOG.md](CHANGELOG.md).
+
+## Reset and interrupts
+
+- `request_reset()` runs the chip's seven-cycle start sequence at the next
+  boundary: three stack reads with nothing written, I set, PC from `$FFFC`
+  (MOS programming manual, section 9.2). It also restarts a CPU stopped by JAM.
+- `request_maskable_interrupt()` asserts IRQ, a level: it stays asserted until
+  `clear_maskable_interrupt()`, as a device holds the line until acknowledged.
+- `request_non_maskable_interrupt()` latches an NMI edge, taken at the next
+  boundary whatever I says.
+
+CLI, SEI and PLP change I after the chip has polled for interrupts, so a
+waiting IRQ is taken one instruction later than I alone suggests; RTI's
+restored I counts at once; an NMI arriving during BRK or an IRQ entry takes it
+over. All three are modelled and tested.
+
+## Learning and inspection
+
+Every opcode handler's docstring starts with its mnemonic, so
+`grep -rn '"""LDA' src/` lands on the implementation, and ends with the page its
+rule comes from. The addressing modes in `_core.py` are written cycle by
+cycle, one bus access per line, in the order the hardware manual lists them.
+
+- [Start here](docs/start-here.md): registers, P, the embedding contract,
+  the bus cycles, reset and interrupts, and the sources.
+- [CPU state](docs/cpu-state.md), [disassembly](docs/disassembly.md),
+  [debug sessions](docs/debug-session.md), [trace schema](docs/trace-schema.md).
+- [Undocumented behaviour](docs/undocumented-behavior.md): the 105 opcodes
+  and the magic constant.
+
+```console
+python -m sixfiveohtwo --load tests/dormann/bin_files/6502_functional_test.bin@0 \
+    --pc 0x0400 --batch -c "step 3" -c "watch 0x0200 w" -c "continue"
+```
+
+## Development
+
+```console
+python -m pytest -m "not slow"                  # the quick loop, ~10 s
+python scripts/fetch_test_vectors.py            # SingleStepTests, ~420 MB
+python scripts/fetch_dormann_tests.py           # Dormann; the decimal test needs cc65
+python -m pytest -m slow                        # the full corpus and both exercisers
+python scripts/fetch_reference_docs.py          # the three cited documents, SHA-256 pinned
+python benchmarks/core_benchmark.py             # instructions per second
+python benchmarks/compare_revisions.py OLD NEW  # a same-process A/B between revisions
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+MIT; see [LICENSE](LICENSE).
