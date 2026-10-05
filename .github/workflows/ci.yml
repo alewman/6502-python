@@ -5,20 +5,51 @@ on:
   pull_request:
 
 jobs:
-  validate:
+  test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.12', '3.13', '3.14', 'pypy3.11']
+        python-version: ["3.12", "3.13", "3.14", "pypy3.11"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install package and development tooling
-        run: python -m pip install -e '.[dev]'
-      - name: Lint
-        run: python -m ruff check .
-      - name: Test
-        run: timeout 1500s python -m pytest
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -q -m "not slow"
+      - run: python -m ruff check .
+      - run: python -m ruff format --check .
+      - run: python examples/minimal_host.py
+
+  # Klaus Dormann's two exercisers are small enough to run on every push: a
+  # 64 KiB binary each, about 30 million instructions for the functional test.
+  # The decimal test is assembled from source with cc65's ca65. The
+  # SingleStepTests corpus (~420 MB) runs in oracles.yml.
+  dormann:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "pypy3.11"
+      - run: sudo apt-get update && sudo apt-get install -y cc65
+      - run: python -m pip install -e ".[dev]"
+      - run: python scripts/fetch_dormann_tests.py
+      - run: test -f tests/dormann/6502_decimal_test.bin
+      - run: python -m pytest tests/test_dormann.py -q -m slow
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade build
+      - run: python -m build --wheel --sdist
+      - run: python -m pip install --force-reinstall dist/*.whl
+      - name: Smoke-test installed public API
+        working-directory: ${{ runner.temp }}
+        run: python ${{ github.workspace }}/scripts/smoke_installed_package.py

@@ -2,8 +2,8 @@
 
 ## Setup
 
-Use Python 3.12 or newer. Create an isolated environment and install the
-package with its development tools from the repository root:
+Python 3.11 or newer; CPython 3.12-3.14 and PyPy 3.11 are what CI tests.
+From the repository root:
 
 ```console
 python3 -m venv .venv
@@ -11,38 +11,38 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[dev]'
 ```
 
-## Validation
-
-Run Ruff before submitting changes:
+## Checks
 
 ```console
 .venv/bin/python -m ruff check .
+.venv/bin/python -m ruff format --check .      # ruff is pinned; CI formats with the same one
+.venv/bin/python -m pytest -m "not slow"       # the quick loop, ~10 s
 ```
 
-For core changes and refactors, run the complete, unscoped suite--not selected
-tests--with a timeout of at least 1500 seconds:
+A change to `src/` must also pass the oracles, run once before review (PyPy
+is fastest):
 
 ```console
-timeout 1500s .venv/bin/python -m pytest
+python scripts/fetch_test_vectors.py           # SingleStepTests, ~420 MB, once
+python scripts/fetch_dormann_tests.py          # Dormann; the decimal test needs cc65's ca65
+.venv/bin/python -m pytest -m slow             # 2,560,000 SST cases, both exercisers
 ```
 
-Compare outcomes with the [immutable refactor baseline](docs/refactor-baseline.md).
-The baseline is a record, not a test assertion: preserve every behavior covered
-by baseline-passing tests and do not hard-code its counts in tests.
+A speed claim is measured with `benchmarks/compare_revisions.py OLD NEW`,
+which times both revisions alternately in one process; separate runs on a
+shared machine move by tens of percent.
+
+## The bar
+
+- Every handler's docstring starts with its mnemonic and ends with the page
+  its rule comes from (`tests/test_readability.py` checks the page).
+- Every bus access the chip makes is made, in order; the SingleStepTests
+  comparison is of the whole cycle list, not its length.
+- Every place the core chooses between disagreeing sources is listed in
+  docs/validation.md, "Divergences", with the source that decided it.
+- Numbers in the docs are regenerated when they change, not remembered.
 
 ## Test oracles
 
-`tests/6502_test_vectors/` and `tests/dormann/` are immutable external oracle
-directories. Do not edit, regenerate, reformat, delete, or commit their
-contents. Use the documented provisioning commands in
-[docs/validation.md](docs/validation.md) when an oracle must be installed or
-refreshed; pytest itself remains offline.
-
-## Core refactors
-
-Refactors of `sixfiveohtwo/` must preserve observable CPU behavior, including
-instruction results, flags, memory effects, cycle totals, interrupt semantics,
-and public API contracts. Keep changes behavior-preserving unless an intentional
-behavior change is explicitly specified and covered by appropriate tests and
-documentation. Do not alter source, tests, or oracle inputs merely to make a
-refactor pass.
+`tests/6502_test_vectors/`, `tests/dormann/` and `reference/` hold external
+material, fetched by the scripts and gitignored. Do not edit or commit them.
