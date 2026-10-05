@@ -1,54 +1,22 @@
-"""Run a three-instruction program using the public sixfiveohtwo API."""
+"""The smallest complete host: 64 KiB of RAM and a three-instruction program."""
 
-from sixfiveohtwo import CPU, CPUState, MemoryBus
-
-
-class HostMemory(MemoryBus):
-    """A complete 64 KiB RAM bus owned by the embedding host."""
-
-    def __init__(self) -> None:
-        self.data = bytearray(0x10000)
-
-    def read_byte(self, address: int, /) -> int:
-        self._require_address(address)
-        return self.data[address]
-
-    def write_byte(self, address: int, value: int, /) -> None:
-        self._require_address(address)
-        self._require_byte(value)
-        self.data[address] = value
-
-    @staticmethod
-    def _require_address(address: int) -> None:
-        if type(address) is not int:
-            raise TypeError("address must be an integer")
-        if not 0 <= address <= 0xFFFF:
-            raise ValueError("address must fit in 16 bits")
-
-    @staticmethod
-    def _require_byte(value: int) -> None:
-        if type(value) is not int:
-            raise TypeError("value must be an integer")
-        if not 0 <= value <= 0xFF:
-            raise ValueError("value must fit in 8 bits")
+from sixfiveohtwo import MOS6502
 
 
 def main() -> None:
-    memory = HostMemory()
-    start = 0x8000
+    memory = bytearray(0x10000)
+    cpu = MOS6502(memory.__getitem__, memory.__setitem__)  # read_byte, write_byte
+
     # LDA #$2A; CLC; ADC #$10 leaves A holding $3A.
-    program = (0xA9, 0x2A, 0x18, 0x69, 0x10)
-    for offset, byte in enumerate(program):
-        memory.write_byte(start + offset, byte)
+    memory[0x8000:0x8005] = bytes((0xA9, 0x2A, 0x18, 0x69, 0x10))
+    memory[0xFFFC:0xFFFE] = bytes((0x00, 0x80))  # the reset vector
+    cpu.request_reset()
 
-    cpu = CPU(memory, state=CPUState(program_counter=start))
+    cycles = cpu.step()  # the reset sequence: seven cycles, PC from $FFFC
     for _ in range(3):
-        cpu.step()
+        cycles += cpu.step()
 
-    print(
-        f"A={cpu.state.a.value:02X} "
-        f"PC={cpu.state.pc.value:04X} cycles={cpu.state.cycles}"
-    )
+    print(f"A={cpu.a:02X} PC={cpu.pc:04X} cycles={cycles}")
 
 
 if __name__ == "__main__":

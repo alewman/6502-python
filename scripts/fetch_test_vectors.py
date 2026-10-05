@@ -40,9 +40,7 @@ def _download(archive: Path) -> str:
                 digest.update(chunk)
                 output.write(chunk)
     except OSError as error:
-        raise OSError(
-            f"unable to download pinned archive {ARCHIVE_URL}: {error}"
-        ) from error
+        raise OSError(f"unable to download pinned archive {ARCHIVE_URL}: {error}") from error
     return digest.hexdigest()
 
 
@@ -60,7 +58,7 @@ def _source_member_path(member: tarfile.TarInfo) -> tuple[str, ...] | None:
 
 def _extract_source(archive: Path, destination: Path) -> None:
     try:
-        bundle = tarfile.open(archive, "r:gz")
+        bundle = tarfile.open(archive, "r:gz")  # noqa: SIM115 - entered as `with bundle` below
     except (OSError, tarfile.TarError) as error:
         raise RuntimeError(f"unable to read downloaded archive: {error}") from error
 
@@ -74,8 +72,7 @@ def _extract_source(archive: Path, destination: Path) -> None:
                 continue
             if not member.isfile():
                 raise RuntimeError(
-                    f"expected regular files under {SOURCE_DIRECTORY!r}; "
-                    f"found {member.name!r}"
+                    f"expected regular files under {SOURCE_DIRECTORY!r}; found {member.name!r}"
                 )
             source_members.append((member, relative_parts))
 
@@ -85,9 +82,7 @@ def _extract_source(archive: Path, destination: Path) -> None:
             if relative_parts[-1].lower().endswith(".json")
         ]
         if not json_members:
-            raise RuntimeError(
-                f"archive does not contain JSON vectors under {SOURCE_DIRECTORY!r}"
-            )
+            raise RuntimeError(f"archive does not contain JSON vectors under {SOURCE_DIRECTORY!r}")
 
         for member, relative_parts in json_members:
             target = destination / SOURCE_DIRECTORY / Path(*relative_parts)
@@ -119,9 +114,7 @@ def _install_atomically(staged: Path, destination: Path) -> None:
     except OSError as error:
         if had_existing and backup.exists() and not target.exists():
             os.replace(backup, target)
-        raise OSError(
-            f"unable to install vector corpus at {target}: {error}"
-        ) from error
+        raise OSError(f"unable to install vector corpus at {target}: {error}") from error
 
     if backup.exists():
         shutil.rmtree(backup)
@@ -132,9 +125,7 @@ def fetch_vectors() -> Path:
     destination = root / DESTINATION
     destination.parent.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(
-        prefix="6502-vectors-", dir=destination.parent
-    ) as temporary:
+    with tempfile.TemporaryDirectory(prefix="6502-vectors-", dir=destination.parent) as temporary:
         temporary_path = Path(temporary)
         archive = temporary_path / "vectors.tar.gz"
         digest = _download(archive)
