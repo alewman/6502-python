@@ -8,7 +8,7 @@ docs/undocumented-behavior.md.
 """
 
 from sixfiveohtwo._alu import add, subtract
-from sixfiveohtwo._core import NZ, C, D, N, V, Z
+from sixfiveohtwo._core import NZ, C, N, V, Z
 from sixfiveohtwo._shifts import _asl, _lsr, _rol, _ror
 
 #: ANE and LXA compute (A OR CONST) AND ...; CONST is chip-dependent (NMS p. 61).
@@ -52,7 +52,7 @@ class UndocumentedMixin:
         """RRA -- ROR M, then A + M + C -> A, decimal mode included (NMS p. 14)."""
         value, p = _ror(self._modify(address, self.read_byte(address)), self.p)
         self.write_byte(address, value)
-        self.a, self.p = add(self.a, value, p)
+        self.a, self.p = add(self.a, value, p, p & self._decimal_mode)
 
     def _op_dcp(self, address: int) -> None:
         """DCP -- DEC M, then CMP M (NMS p. 22)."""
@@ -64,7 +64,8 @@ class UndocumentedMixin:
         """ISC -- INC M, then A - M - (1 - C) -> A, decimal mode included (NMS p. 26)."""
         value = (self._modify(address, self.read_byte(address)) + 1) & 0xFF
         self.write_byte(address, value)
-        self.a, self.p = subtract(self.a, value, self.p)
+        p = self.p
+        self.a, self.p = subtract(self.a, value, p, p & self._decimal_mode)
 
     # -- loads and stores of two registers -------------------------------
 
@@ -106,7 +107,7 @@ class UndocumentedMixin:
         result = (value >> 1) | ((p & C) << 7)
         # N and Z from the rotated value; V from bits 6 and 5 of it.
         p = (p & ~(N | V | Z | C)) | NZ[result] | ((result ^ (result << 1)) & V)
-        if p & D:
+        if p & self._decimal_mode:
             # Decimal mode: a BCD fix-up of each digit of the rotated value,
             # decided by the digits of the value before rotating (NMS p. 78).
             if (value & 0x0F) >= 0x05:
@@ -128,7 +129,8 @@ class UndocumentedMixin:
 
     def _op_usbc(self, address: int) -> None:
         """USBC -- $EB, the same operation as SBC #imm (NMS p. 40)."""
-        self.a, self.p = subtract(self.a, self.read_byte(address), self.p)
+        p = self.p
+        self.a, self.p = subtract(self.a, self.read_byte(address), p, p & self._decimal_mode)
 
     # -- unstable: magic constant (NMS p. 60) ----------------------------
 

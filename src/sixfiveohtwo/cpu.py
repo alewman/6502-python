@@ -219,6 +219,24 @@ class MOS6502(
         self._extra = 0
 
 
+class RP2A03(MOS6502):
+    """The NMOS 6502 inside Nintendo's RP2A03 and RP2A07: decimal mode disconnected.
+
+    The NES and Famicom CPU is this core with the decimal adjust cut out of
+    the die ("cutting 5 pieces of polysilicon"; the instruction decoder is
+    otherwise identical: the Breaks wiki, ``BreakingNESWiki_DeepL/APU/core.md``,
+    die-derived). D is still a flag that SED, CLD, PHP, PLP and RTI set,
+    clear, push and pull, but ADC, SBC, USBC, RRA, ISC and ARR compute in
+    binary with binary flags whatever it says. SingleStepTests ``nes6502``
+    checks this part as ``6502`` checks :class:`MOS6502`
+    (docs/validation.md).
+
+    The APU, DMA and the rest of the chip are the host's, like every device.
+    """
+
+    _decimal_mode = 0
+
+
 __all__ = [
     "FLAG_B",
     "FLAG_C",
@@ -229,6 +247,7 @@ __all__ = [
     "FLAG_V",
     "FLAG_Z",
     "MOS6502",
+    "RP2A03",
     "STACK",
     "CPUState",
     "ReadByte",

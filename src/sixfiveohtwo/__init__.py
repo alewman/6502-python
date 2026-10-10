@@ -11,6 +11,7 @@ from sixfiveohtwo.cpu import (
     FLAG_V,
     FLAG_Z,
     MOS6502,
+    RP2A03,
 )
 from sixfiveohtwo.debug import (
     Access,
@@ -56,6 +57,7 @@ __all__ = [
     "FLAG_V",
     "FLAG_Z",
     "MOS6502",
+    "RP2A03",
     "TRACE_SCHEMA_VERSION",
     "Access",
     "BoundaryKind",

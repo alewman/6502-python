@@ -34,6 +34,11 @@ WriteByte = Callable[[int, int], None]
 class CoreMixin:
     """Private implementation of CPU state and the helpers every handler uses."""
 
+    #: The D bit as the adder sees it: D where the decimal adjust is wired up,
+    #: 0 on a part that has it disconnected (``RP2A03``). ADC, SBC, USBC, RRA,
+    #: ISC and ARR pass ``p & _decimal_mode`` to the arithmetic.
+    _decimal_mode = D
+
     def _init_core(self) -> None:
         # A, X, Y and S hold "any random condition" until reset, which sets
         # only I and PC (PM section 9.2, p. 126; section 9.3, p. 127); zero

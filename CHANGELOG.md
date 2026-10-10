@@ -64,6 +64,13 @@ family's reference core, and made correct to the bus cycle.
 
 ### Added
 
+- **`RP2A03`, the NES and Famicom CPU**: `MOS6502` with the decimal adjust
+  disconnected, as on the die (the Breaks wiki). D is still a flag; ADC, SBC,
+  USBC, RRA, ISC and ARR compute in binary whatever it says. Certified
+  against SingleStepTests' "nes6502" set, which `fetch_test_vectors.py` now
+  fetches beside "6502" from the same pinned revision. The decimal adjust is
+  one class attribute, `_decimal_mode`, which the arithmetic handlers pass to
+  `add`/`subtract`; no handler is duplicated.
 - **Interrupt timing the chip has and the old core did not**: CLI, SEI and
   PLP delay a waiting IRQ by one instruction; RTI's restored I counts at
   once; an NMI arriving during BRK or an IRQ entry takes it over; IRQ is a
