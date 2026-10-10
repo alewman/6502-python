@@ -8,13 +8,15 @@ mode" chapter (pp. 70-80), which the SingleStepTests corpus and Klaus
 Dormann's decimal exerciser both check.
 """
 
-from sixfiveohtwo._core import NZ, C, D, N, V, Z
+from sixfiveohtwo._core import NZ, C, N, V, Z
 
 
-def add(a: int, value: int, p: int) -> tuple[int, int]:
+def add(a: int, value: int, p: int, decimal: int) -> tuple[int, int]:
     """A + M + C, binary or NMOS decimal; return (A, P).
 
-    In decimal mode the NMOS 6502 sets Z from the binary sum and N and V from
+    ``decimal`` is P's D bit as the adder sees it: the handler passes
+    ``p & self._decimal_mode``, which is 0 on a part whose decimal adjust is
+    disconnected. In decimal mode the NMOS 6502 sets Z from the binary sum and N and V from
     the sum after the low digit is adjusted and before the high digit is
     (NMS pp. 73-75), so only C is a decimal flag.
     """
@@ -23,7 +25,7 @@ def add(a: int, value: int, p: int) -> tuple[int, int]:
     p &= ~(N | V | Z | C)
     if not total & 0xFF:
         p |= Z
-    if p & D:
+    if decimal:
         low = (a & 0x0F) + (value & 0x0F) + carry
         if low >= 0x0A:
             low = ((low + 0x06) & 0x0F) + 0x10
@@ -45,11 +47,11 @@ def add(a: int, value: int, p: int) -> tuple[int, int]:
     return result, p
 
 
-def subtract(a: int, value: int, p: int) -> tuple[int, int]:
+def subtract(a: int, value: int, p: int, decimal: int) -> tuple[int, int]:
     """A - M - (1 - C), binary or NMOS decimal; return (A, P).
 
-    Every flag comes from the binary difference, in decimal mode too; only A
-    is adjusted (NMS pp. 76-77).
+    ``decimal`` is as for :func:`add`. Every flag comes from the binary
+    difference, in decimal mode too; only A is adjusted (NMS pp. 76-77).
     """
     borrow = 1 - (p & C)
     difference = a - value - borrow
@@ -59,7 +61,7 @@ def subtract(a: int, value: int, p: int) -> tuple[int, int]:
         p |= V
     if difference >= 0:
         p |= C
-    if not p & D:
+    if not decimal:
         return binary, p
     low = (a & 0x0F) - (value & 0x0F) - borrow
     high = (a >> 4) - (value >> 4)
@@ -76,11 +78,13 @@ class ALUMixin:
 
     def _op_adc(self, address: int) -> None:
         """ADC -- A + M + C -> A, C (PM p. B-3)."""
-        self.a, self.p = add(self.a, self.read_byte(address), self.p)
+        p = self.p
+        self.a, self.p = add(self.a, self.read_byte(address), p, p & self._decimal_mode)
 
     def _op_sbc(self, address: int) -> None:
         """SBC -- A - M - (1 - C) -> A (PM p. B-24)."""
-        self.a, self.p = subtract(self.a, self.read_byte(address), self.p)
+        p = self.p
+        self.a, self.p = subtract(self.a, self.read_byte(address), p, p & self._decimal_mode)
 
     def _op_and(self, address: int) -> None:
         """AND -- A AND M -> A (PM p. B-3)."""
