@@ -20,18 +20,23 @@ jobs:
           python-version: "pypy3.11"
       - run: python -m pip install -e ".[dev]"
 
-      # Keyed on the pinned revision, so the cache is invalidated by changing
-      # the pin and by nothing else.
+      # Keyed on the pinned revision and the sets fetched, so the cache is
+      # invalidated by changing either and by nothing else. (A cache of the
+      # "6502" set alone would skip the "nes6502" tests, not fail them.)
       - name: Restore the SingleStepTests corpus
         id: vectors
         uses: actions/cache@v4
         with:
           path: tests/6502_test_vectors
-          key: sst-6502-2f6980a2d95757486c7bee24355c360e40e2a224
+          key: sst-6502-nes6502-2f6980a2d95757486c7bee24355c360e40e2a224
 
       - name: Fetch the SingleStepTests corpus
         if: steps.vectors.outputs.cache-hit != 'true'
         run: python scripts/fetch_test_vectors.py
 
-      - name: SingleStepTests — 256 files, 2,560,000 cases, every bus cycle
-        run: python -m pytest tests/test_single_step_tests.py -q -m slow
+      - name: SingleStepTests — two sets of 256 files, 2,560,000 cases each, every bus cycle
+        run: |
+          # A missing set skips its tests, so prove both are here first.
+          test -f tests/6502_test_vectors/6502/v1/a9.json
+          test -f tests/6502_test_vectors/nes6502/v1/a9.json
+          python -m pytest tests/test_single_step_tests.py -q -m slow

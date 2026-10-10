@@ -16,7 +16,8 @@ from urllib.request import urlopen
 REPOSITORY_URL = "https://github.com/SingleStepTests/65x02"
 REVISION = "2f6980a2d95757486c7bee24355c360e40e2a224"
 ARCHIVE_URL = f"{REPOSITORY_URL}/archive/{REVISION}.tar.gz"
-SOURCE_DIRECTORY = "6502"
+#: The corpus's NMOS set (MOS6502) and its decimal-less RP2A03 set (RP2A03).
+SOURCE_DIRECTORIES = ("6502", "nes6502")
 DESTINATION = Path("tests") / "6502_test_vectors"
 
 # SingleStepTests does not publish a checksum for the generated GitHub archive.
@@ -44,19 +45,19 @@ def _download(archive: Path) -> str:
     return digest.hexdigest()
 
 
-def _source_member_path(member: tarfile.TarInfo) -> tuple[str, ...] | None:
+def _source_member_path(member: tarfile.TarInfo, source_directory: str) -> tuple[str, ...] | None:
     path = PurePosixPath(member.name)
     parts = path.parts
     if path.is_absolute() or len(parts) < 3 or parts[0] in (".", ".."):
         return None
     if any(part in ("", ".", "..") for part in parts):
         return None
-    if parts[1] != SOURCE_DIRECTORY:
+    if parts[1] != source_directory:
         return None
     return parts[2:]
 
 
-def _extract_source(archive: Path, destination: Path) -> None:
+def _extract_source(archive: Path, destination: Path, source_directory: str) -> None:
     try:
         bundle = tarfile.open(archive, "r:gz")  # noqa: SIM115 - entered as `with bundle` below
     except (OSError, tarfile.TarError) as error:
@@ -65,14 +66,14 @@ def _extract_source(archive: Path, destination: Path) -> None:
     with bundle:
         source_members: list[tuple[tarfile.TarInfo, tuple[str, ...]]] = []
         for member in bundle.getmembers():
-            relative_parts = _source_member_path(member)
+            relative_parts = _source_member_path(member, source_directory)
             if relative_parts is None:
                 continue
             if member.isdir():
                 continue
             if not member.isfile():
                 raise RuntimeError(
-                    f"expected regular files under {SOURCE_DIRECTORY!r}; found {member.name!r}"
+                    f"expected regular files under {source_directory!r}; found {member.name!r}"
                 )
             source_members.append((member, relative_parts))
 
@@ -82,10 +83,10 @@ def _extract_source(archive: Path, destination: Path) -> None:
             if relative_parts[-1].lower().endswith(".json")
         ]
         if not json_members:
-            raise RuntimeError(f"archive does not contain JSON vectors under {SOURCE_DIRECTORY!r}")
+            raise RuntimeError(f"archive does not contain JSON vectors under {source_directory!r}")
 
         for member, relative_parts in json_members:
-            target = destination / SOURCE_DIRECTORY / Path(*relative_parts)
+            target = destination / source_directory / Path(*relative_parts)
             target.parent.mkdir(parents=True, exist_ok=True)
             try:
                 source = bundle.extractfile(member)
@@ -99,9 +100,9 @@ def _extract_source(archive: Path, destination: Path) -> None:
                 shutil.copyfileobj(source, output)
 
 
-def _install_atomically(staged: Path, destination: Path) -> None:
-    target = destination / SOURCE_DIRECTORY
-    backup = destination / f".{SOURCE_DIRECTORY}.old"
+def _install_atomically(staged: Path, destination: Path, source_directory: str) -> None:
+    target = destination / source_directory
+    backup = destination / f".{source_directory}.old"
     if backup.exists() or backup.is_symlink():
         raise RuntimeError(f"temporary backup path already exists: {backup}")
 
@@ -110,7 +111,7 @@ def _install_atomically(staged: Path, destination: Path) -> None:
     try:
         if had_existing:
             os.replace(target, backup)
-        os.replace(staged / SOURCE_DIRECTORY, target)
+        os.replace(staged / source_directory, target)
     except OSError as error:
         if had_existing and backup.exists() and not target.exists():
             os.replace(backup, target)
@@ -120,7 +121,7 @@ def _install_atomically(staged: Path, destination: Path) -> None:
         shutil.rmtree(backup)
 
 
-def fetch_vectors() -> Path:
+def fetch_vectors() -> list[Path]:
     root = _project_root()
     destination = root / DESTINATION
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -136,15 +137,18 @@ def fetch_vectors() -> Path:
 
         staged = temporary_path / "staged"
         staged.mkdir()
-        _extract_source(archive, staged)
-        _install_atomically(staged, destination)
+        # Extract every set before installing any, so a bad archive replaces nothing.
+        for source_directory in SOURCE_DIRECTORIES:
+            _extract_source(archive, staged, source_directory)
+        for source_directory in SOURCE_DIRECTORIES:
+            _install_atomically(staged, destination, source_directory)
 
-    return destination / SOURCE_DIRECTORY
+    return [destination / source_directory for source_directory in SOURCE_DIRECTORIES]
 
 
 def main() -> int:
     try:
-        path = fetch_vectors()
+        paths = fetch_vectors()
     except OSError as error:
         print(f"failed to fetch vector corpus: {error}", file=sys.stderr)
         return 1
@@ -152,7 +156,8 @@ def main() -> int:
         print(f"invalid vector corpus: {error}", file=sys.stderr)
         return 1
 
-    print(f"fetched SingleStepTests {REVISION} to {path}")
+    for path in paths:
+        print(f"fetched SingleStepTests {REVISION} to {path}")
     return 0
 
 
