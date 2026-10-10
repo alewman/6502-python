@@ -1,4 +1,5 @@
-"""Load and run the SingleStepTests 65x02 corpus (the "6502" NMOS set).
+"""Load and run the SingleStepTests 65x02 corpus: its "6502" NMOS set and its
+"nes6502" set, the same chip with decimal mode disconnected (RP2A03).
 
 Each case gives a register image, RAM contents, the state after one
 instruction, and the address, value and direction of every bus cycle the
@@ -15,23 +16,25 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from sixfiveohtwo import MOS6502
+from sixfiveohtwo import MOS6502, RP2A03
 
-ROOT = Path(__file__).resolve().parent / "6502_test_vectors" / "6502" / "v1"
+VECTORS = Path(__file__).resolve().parent / "6502_test_vectors"
+#: Each set of the corpus and the CPU class it checks.
+SETS: dict[str, type[MOS6502]] = {"6502": MOS6502, "nes6502": RP2A03}
 FETCH_HINT = "run `python scripts/fetch_test_vectors.py` to fetch the pinned corpus"
 
 
-def corpus_present() -> bool:
-    return (ROOT / "a9.json").is_file()
+def corpus_present(corpus: str = "6502") -> bool:
+    return (VECTORS / corpus / "v1" / "a9.json").is_file()
 
 
-def load_cases(opcode: int, limit: int | None = None) -> list[dict]:
+def load_cases(opcode: int, limit: int | None = None, corpus: str = "6502") -> list[dict]:
     """The corpus's cases for ``opcode``: all 10,000, or only the first ``limit``.
 
     A limited load decodes the file's JSON array incrementally and stops,
     so a sample costs its own size rather than the whole 1.6 MB file.
     """
-    path = ROOT / f"{opcode:02x}.json"
+    path = VECTORS / corpus / "v1" / f"{opcode:02x}.json"
     if limit is None:
         with path.open(encoding="utf-8") as stream:
             return json.load(stream)
@@ -70,8 +73,8 @@ class Mismatch:
         return f"{self.name}: {self.field} is {self.got!r}, expected {self.expected!r}"
 
 
-def run_case(case: dict) -> list[Mismatch]:
-    """Run one case; return every field that disagrees (empty when it passes)."""
+def run_case(case: dict, cpu_class: type[MOS6502] = MOS6502) -> list[Mismatch]:
+    """Run one case on ``cpu_class``; return every field that disagrees (empty when it passes)."""
     initial, final, name = case["initial"], case["final"], case["name"]
     memory: dict[int, int] = dict(initial["ram"])
     bus: list[list] = []
@@ -85,7 +88,7 @@ def run_case(case: dict) -> list[Mismatch]:
         bus.append([address, value, "write"])
         memory[address] = value
 
-    cpu = MOS6502(read_byte, write_byte)
+    cpu = cpu_class(read_byte, write_byte)
     cpu.a, cpu.x, cpu.y, cpu.s, cpu.pc = (initial[k] for k in ("a", "x", "y", "s", "pc"))
     cpu.p = (initial["p"] | 0x20) & ~0x10
 

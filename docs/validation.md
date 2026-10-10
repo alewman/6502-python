@@ -13,10 +13,13 @@ detects disagreements; the highest tier that speaks to a question decides it.
 | --- | --- | --- | --- |
 | self-checking program | Klaus Dormann's 6502 functional test | every documented instruction, addressing mode and flag, run as a 30.6-million-instruction program that traps on the first wrong result | `tests/test_dormann.py` |
 | self-checking program | the decimal test (Bruce Clark's, in Dormann's suite; amb5l's ca65 port) | every ADC and SBC result and N V Z C in decimal mode, all 131,072 operand and carry combinations each, invalid BCD included, by NMOS rules | `tests/test_dormann.py` |
-| emulator-derived | SingleStepTests 65x02, "6502" set | 10,000 cases per opcode, all 256: registers, RAM, and every bus cycle's address, value and direction | `tests/test_single_step_tests.py` |
+| emulator-derived | SingleStepTests 65x02, "6502" set | `MOS6502`: 10,000 cases per opcode, all 256: registers, RAM, and every bus cycle's address, value and direction | `tests/test_single_step_tests.py` |
+| emulator-derived | SingleStepTests 65x02, "nes6502" set | `RP2A03`: the same, for the NES CPU, whose decimal mode is disconnected | `tests/test_single_step_tests.py` |
+| die-derived | the Breaks wiki, `BreakingNESWiki_DeepL/APU/core.md` | that the RP2A03's 6502 differs from the NMOS part only in its cut decimal-adjust signals `/DAA` and `/DSA` | `RP2A03`'s docstring |
 | documentation | MOS programming manual (PM), hardware manual (HM), *No More Secrets* v0.99 (NMS), NESdev wiki | each handler's rule and each addressing mode's cycles; interrupt timing | `tests/test_readability.py`, `tests/test_interrupts.py` |
 
-No oracle here was captured from a chip. Dormann's programs compute their own
+No oracle here was captured from a chip; the Breaks wiki was read from one
+(a die photograph traced to a netlist), and says only which signals are cut. Dormann's programs compute their own
 expected values from the documented behaviour; SingleStepTests was generated
 by its author's emulator; the manuals are what MOS and later researchers wrote
 down. The bus order in particular has no hardware-captured oracle: it is
@@ -31,7 +34,8 @@ commit that introduced them and rerun on every commit since:
 | Gate | Command | Result | Time |
 | --- | --- | --- | --- |
 | SingleStepTests, full | `pytest -m slow tests/test_single_step_tests.py` | 2,560,000 / 2,560,000 cases, bus included | 33 s with both exercisers (PyPy); 2 min 54 s (CPython 3.14) |
-| SingleStepTests, sample | `pytest -m "not slow"` | 100 cases x 256 opcodes | part of ~10 s |
+| SingleStepTests "nes6502", full (`RP2A03`) | same | 2,560,000 / 2,560,000 cases, bus included | both sets and both exercisers 7 min 26 s (PyPy, load average 54, 2026-10-10) |
+| SingleStepTests, sample | `pytest -m "not slow"` | 100 cases x 256 opcodes, each set | part of ~10 s |
 | Dormann functional | `pytest -m slow tests/test_dormann.py` | success trap `$3469` after 30,646,177 instructions | 4.6 s for both (PyPy) |
 | Dormann decimal | same | `ERROR` = 0 at the `$044B` trap | (above) |
 | Readability | `pytest tests/test_readability.py` | every handler cites its own PM Appendix B page or NMS section | < 1 s |
@@ -40,13 +44,17 @@ Each oracle was also checked to fail: breaking the carry of one CMP case
 traps the functional test at `$1CDB`; one wrong BCD sum leaves the decimal
 test's `ERROR` at 1; dropping the dummy read of zero page,X fails
 SingleStepTests on the bus comparison alone (the cycle count still matched,
-which is why the bus is compared).
+which is why the bus is compared). For `RP2A03` (2026-10-10), wiring its
+decimal adjust back up fails `nes6502` on 4,732 of `69`'s 10,000 cases, 2,790
+of ARR's and thousands of each other affected opcode's; cutting it on
+`MOS6502` fails `6502` the same way.
 
 ### SingleStepTests
 
 `SingleStepTests/65x02 @ 2f6980a2d95757486c7bee24355c360e40e2a224`, MIT
 licensed, fetched with `python scripts/fetch_test_vectors.py` into
-`tests/6502_test_vectors/6502/` (gitignored; ~420 MB). The generated GitHub
+`tests/6502_test_vectors/6502/` and `tests/6502_test_vectors/nes6502/`
+(gitignored; ~420 MB each). `nes6502` runs on `RP2A03`, `6502` on `MOS6502`. The generated GitHub
 archive has no published SHA-256, so none is claimed; the immutable commit
 URL is the provenance.
 
@@ -139,8 +147,9 @@ Every place the sources disagree, and what the core does.
   from inside a bus callback during the last cycle is, on hardware, taken one
   instruction later than here. Requests made between steps -- the usual case --
   are exact, including the CLI/SEI/PLP delay and BRK/IRQ hijacking by NMI.
-- There is no RDY, SO or bus-halt input, and no 65C02, 65816, 2A03 or 6510
-  variant.
+- There is no RDY, SO or bus-halt input, and no 65C02, 65816 or 6510
+  variant. The RP2A03 is here only as its 6502 (`RP2A03`): its APU, DMA and
+  joypad ports are the host's.
 - The per-cycle timing within an instruction is the order of bus accesses and
   their count; nothing is claimed about sub-cycle timing.
 
@@ -159,3 +168,10 @@ process, alternately, the method of `benchmarks/compare_revisions.py`.
 
 The new core also does more per instruction than the old one did: every dummy
 read and dummy write is a real call on the host's bus.
+
+`RP2A03`'s decimal-mode attribute costs the NMOS core one class-attribute
+load per ADC, SBC, USBC, RRA, ISC and ARR. Against `25877b3` in one process
+(2026-10-10, best of 20): CPython 3.14 x0.973 to x0.997 across the four
+workloads; on PyPy 3.11 the ratio moved between x0.87 and x1.14, including on
+workloads that never reach the changed code, which at load average ~50 is
+the noise floor, so no change is claimed there.

@@ -37,7 +37,7 @@ def _use_project(tmp_path, monkeypatch):
     return tmp_path / fetch_test_vectors.DESTINATION
 
 
-def test_fetch_vectors_uses_pinned_url_and_installs_6502_layout(tmp_path, monkeypatch):
+def test_fetch_vectors_uses_pinned_url_and_installs_both_sets(tmp_path, monkeypatch):
     archive = _archive(
         (
             f"65x02-{fetch_test_vectors.REVISION}/6502/v1/adc.json",
@@ -46,6 +46,14 @@ def test_fetch_vectors_uses_pinned_url_and_installs_6502_layout(tmp_path, monkey
         (
             f"65x02-{fetch_test_vectors.REVISION}/6502/README.md",
             "vectors",
+        ),
+        (
+            f"65x02-{fetch_test_vectors.REVISION}/nes6502/v1/adc.json",
+            '{"name": "nes adc"}',
+        ),
+        (
+            f"65x02-{fetch_test_vectors.REVISION}/wdc65c02/v1/adc.json",
+            "not fetched",
         ),
     )
     requested = []
@@ -61,9 +69,11 @@ def test_fetch_vectors_uses_pinned_url_and_installs_6502_layout(tmp_path, monkey
 
     assert requested == [(fetch_test_vectors.ARCHIVE_URL, 60)]
     assert fetch_test_vectors.REVISION in requested[0][0]
-    assert installed == destination / "6502"
-    assert (installed / "v1" / "adc.json").read_text() == '{"name": "adc"}'
-    assert not (installed / "README.md").exists()
+    assert installed == [destination / "6502", destination / "nes6502"]
+    assert (installed[0] / "v1" / "adc.json").read_text() == '{"name": "adc"}'
+    assert (installed[1] / "v1" / "adc.json").read_text() == '{"name": "nes adc"}'
+    assert not (installed[0] / "README.md").exists()
+    assert not (destination / "wdc65c02").exists()
 
 
 def test_fetch_vectors_replaces_existing_corpus(tmp_path, monkeypatch):
@@ -75,6 +85,7 @@ def test_fetch_vectors_replaces_existing_corpus(tmp_path, monkeypatch):
 
     archive = _archive(
         ("source/6502/v1/adc.json", "new"),
+        ("source/nes6502/v1/adc.json", "new"),
     )
     monkeypatch.setattr(
         fetch_test_vectors,
@@ -96,6 +107,10 @@ def test_fetch_vectors_replaces_existing_corpus(tmp_path, monkeypatch):
         (
             _archive(("source/README.md", "not vectors")),
             "archive does not contain JSON vectors under '6502'",
+        ),
+        (
+            _archive(("source/6502/v1/adc.json", "only one set")),
+            "archive does not contain JSON vectors under 'nes6502'",
         ),
     ],
 )

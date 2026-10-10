@@ -13,7 +13,8 @@ in as two callables, `step()` returns the cycles it took, registers are plain
 attributes, and the same debugger, disassembler and trace format sit beside
 the core. It implements all 256 NMOS 6502 opcodes, the 151 MOS documented and
 the 105 it did not, and makes every bus access the chip makes, in the chip's
-order, dummy reads and read-modify-write dummy writes included.
+order, dummy reads and read-modify-write dummy writes included. `RP2A03` is
+the NES and Famicom CPU: the same chip with its decimal mode disconnected.
 
 The project is deliberately:
 
@@ -39,8 +40,9 @@ Each oracle is named with its tier: where its expected values came from
   success trap) and the decimal test (every ADC and SBC result and flag in
   decimal mode, by NMOS rules), whose expected values their authors computed;
 - **emulator-derived:** the SingleStepTests 65x02 corpus, all 256 opcodes,
-  2,560,000 of 2,560,000 cases: registers, RAM, cycle count, and the address,
-  value and direction of every bus cycle;
+  2,560,000 of 2,560,000 cases of its "6502" set: registers, RAM, cycle
+  count, and the address, value and direction of every bus cycle; and
+  `RP2A03` against its "nes6502" set the same way, 2,560,000 of 2,560,000;
 - **documentation:** MOS's programming and hardware manuals for the documented
   instructions and their bus cycles, *No More Secrets* v0.99 for the
   undocumented ones, the NESdev wiki for interrupt timing; every handler cites
@@ -131,7 +133,7 @@ python -m sixfiveohtwo --load tests/dormann/bin_files/6502_functional_test.bin@0
 
 ```console
 python -m pytest -m "not slow"                  # the quick loop, ~10 s
-python scripts/fetch_test_vectors.py            # SingleStepTests, ~420 MB
+python scripts/fetch_test_vectors.py            # SingleStepTests, ~840 MB
 python scripts/fetch_dormann_tests.py           # Dormann; the decimal test needs cc65
 python -m pytest -m slow                        # the full corpus and both exercisers
 python scripts/fetch_reference_docs.py          # the three cited documents, SHA-256 pinned
