@@ -110,9 +110,10 @@ cycle, and so does the core: a board that raises IRQ or NMI from inside its
 bus callbacks sees it taken on the instruction the chip would take it on.
 CLI, SEI and PLP change I after that poll, so a waiting IRQ is taken one
 instruction later than I alone suggests; RTI's restored I counts at once;
-BRK and interrupt entries do not poll; an NMI by the end of cycle 4 of BRK or
-an IRQ entry takes it over. All of these are modelled and tested cycle by
-cycle ([docs/start-here.md](docs/start-here.md)).
+BRK and interrupt entries do not poll; branches poll at their own points;
+an NMI by the end of cycle 4 of BRK or an IRQ entry takes it over. All of
+these are modelled and tested cycle by cycle
+([docs/start-here.md](docs/start-here.md)).
 
 ## Learning and inspection
 
