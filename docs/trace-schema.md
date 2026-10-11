@@ -42,9 +42,11 @@ No other keys are allowed.
 | `irq` | IRQ was asserted and the boundary's poll saw I clear: 7 cycles through $FFFE. |
 
 The kind follows from `before`, in this order: `reset_pending`, then
-`halted`, then `non_maskable_interrupt_pending`, then
-`maskable_interrupt_pending` with the polled I clear (`polled_i` when it is
-not `null`, else P's I bit), else `instruction`.
+`halted`, then `instruction` if `skipped_poll`, then the polled NMI
+(`polled_non_maskable_interrupt` when it is not `null`, else
+`non_maskable_interrupt_pending`), then the polled IRQ likewise with the
+polled I clear (`polled_i` when it is not `null`, else P's I bit), else
+`instruction`.
 
 ### `instruction`
 
@@ -74,6 +76,9 @@ Every key is required and no others are allowed.
 | `maskable_interrupt_pending` | boolean | The IRQ line is asserted. |
 | `non_maskable_interrupt_pending` | boolean | An NMI edge is latched. |
 | `polled_i` | boolean or `null` | The I flag the last poll saw, after CLI, SEI or PLP; `null` otherwise. |
+| `polled_maskable_interrupt` | boolean or `null` | The IRQ line as the last poll saw it, when that differs from `maskable_interrupt_pending`; `null` otherwise. |
+| `polled_non_maskable_interrupt` | boolean or `null` | The NMI latch as the last poll saw it, likewise. |
+| `skipped_poll` | boolean | The last step was BRK, an interrupt entry or reset, which do not poll. |
 
 These are the fields of `CPUState`, the definition of processor state for
 equivalence purposes. Memory and devices are host state and not in the trace.
@@ -84,7 +89,7 @@ An external producer's record for `INX` at $0200 with X = $2A, accesses
 tracked:
 
 ```json
-{"accesses":[["r",512,232],["r",513,0]],"after":{"a":0,"halted":false,"maskable_interrupt_pending":false,"non_maskable_interrupt_pending":false,"p":36,"pc":513,"polled_i":null,"reset_pending":false,"s":0,"x":43,"y":0},"before":{"a":0,"halted":false,"maskable_interrupt_pending":false,"non_maskable_interrupt_pending":false,"p":36,"pc":512,"polled_i":null,"reset_pending":false,"s":0,"x":42,"y":0},"cycles":2,"instruction":{"address":512,"data":"e8"},"kind":"instruction","sequence":0,"version":1}
+{"accesses":[["r",512,232],["r",513,0]],"after":{"a":0,"halted":false,"maskable_interrupt_pending":false,"non_maskable_interrupt_pending":false,"p":36,"pc":513,"polled_i":null,"polled_maskable_interrupt":null,"polled_non_maskable_interrupt":null,"reset_pending":false,"s":0,"skipped_poll":false,"x":43,"y":0},"before":{"a":0,"halted":false,"maskable_interrupt_pending":false,"non_maskable_interrupt_pending":false,"p":36,"pc":512,"polled_i":null,"polled_maskable_interrupt":null,"polled_non_maskable_interrupt":null,"reset_pending":false,"s":0,"skipped_poll":false,"x":42,"y":0},"cycles":2,"instruction":{"address":512,"data":"e8"},"kind":"instruction","sequence":0,"version":1}
 ```
 
 ## Comparison rules

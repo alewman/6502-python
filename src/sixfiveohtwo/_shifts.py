@@ -36,40 +36,40 @@ class ShiftMixin:
 
     def _modify(self, address: int, value: int) -> int:
         # The first write is the unmodified byte (NMS p. 88; HM p. A-8, cycle T3).
-        self.write_byte(address, value)
+        self._write(address, value)
         return value
 
     def _op_asl(self, address: int) -> None:
         """ASL -- C <- M7..M0 <- 0 (PM p. B-4)."""
-        value, self.p = _asl(self._modify(address, self.read_byte(address)), self.p)
-        self.write_byte(address, value)
+        value, self.p = _asl(self._modify(address, self._read(address)), self.p)
+        self._write(address, value)
 
     def _op_lsr(self, address: int) -> None:
         """LSR -- 0 -> M7..M0 -> C (PM p. B-19)."""
-        value, self.p = _lsr(self._modify(address, self.read_byte(address)), self.p)
-        self.write_byte(address, value)
+        value, self.p = _lsr(self._modify(address, self._read(address)), self.p)
+        self._write(address, value)
 
     def _op_rol(self, address: int) -> None:
         """ROL -- C <- M7..M0 <- C (PM p. B-22)."""
-        value, self.p = _rol(self._modify(address, self.read_byte(address)), self.p)
-        self.write_byte(address, value)
+        value, self.p = _rol(self._modify(address, self._read(address)), self.p)
+        self._write(address, value)
 
     def _op_ror(self, address: int) -> None:
         """ROR -- C -> M7..M0 -> C (PM p. B-23)."""
-        value, self.p = _ror(self._modify(address, self.read_byte(address)), self.p)
-        self.write_byte(address, value)
+        value, self.p = _ror(self._modify(address, self._read(address)), self.p)
+        self._write(address, value)
 
     def _op_inc(self, address: int) -> None:
         """INC -- M + 1 -> M (PM p. B-15)."""
-        value = (self._modify(address, self.read_byte(address)) + 1) & 0xFF
+        value = (self._modify(address, self._read(address)) + 1) & 0xFF
         self.p = (self.p & ~(N | Z)) | NZ[value]
-        self.write_byte(address, value)
+        self._write(address, value)
 
     def _op_dec(self, address: int) -> None:
         """DEC -- M - 1 -> M (PM p. B-13)."""
-        value = (self._modify(address, self.read_byte(address)) - 1) & 0xFF
+        value = (self._modify(address, self._read(address)) - 1) & 0xFF
         self.p = (self.p & ~(N | Z)) | NZ[value]
-        self.write_byte(address, value)
+        self._write(address, value)
 
     def _op_asl_a(self) -> None:
         """ASL A -- C <- A7..A0 <- 0 (PM p. B-4)."""
