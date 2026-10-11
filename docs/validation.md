@@ -131,10 +131,13 @@ Every place the sources disagree, and what the core does.
    after PLP and RTI and otherwise carries whatever its generator chose. No
    instruction can observe it, so the core keeps P's bit 4 clear and bit 5 set,
    and compares P with the corpus on the other seven bits.
-6. **ANE and LXA use $EE for the magic constant.** NMS pp. 60-61: the
-   constant varies between chips and with temperature ($EE, $00 and $FF are
-   among the values reported). $EE is SingleStepTests' value. Programs that depend on it do not run
-   reliably on real hardware either.
+6. **ANE and LXA use $EE for the magic constant by default.** NMS pp. 60-61:
+   the constant varies between chips and with temperature ($EE, $00 and $FF
+   are among the values reported). $EE is SingleStepTests' value. It is a
+   setting of each CPU, `ane_constant` and `lxa_constant`, so a board can
+   model its console: blargg's `instr_test-v5` (CRCs taken on an NES) needs
+   LXA's at $FF, and famicom-python sets that. Programs that depend on it do
+   not run reliably on real hardware either.
 7. **SHA, SHX, SHY and TAS store "AND (H+1)" and, across a page, write to the
    corrupted address.** NMS pp. 48-49 also describes the AND dropping out when
    RDY or a DMA steals a cycle at the wrong moment; the core has no RDY input,
