@@ -100,9 +100,28 @@ clear), I set, the vector read ($FFFE for IRQ and BRK, $FFFA for NMI).
 Priority at a boundary: reset, then (unless JAM has stopped the CPU) NMI,
 then IRQ.
 
-Three timing rules come from the chip's interrupt poll happening before the
-instruction's last cycle rather than after it (NESdev wiki, "CPU
-interrupts"):
+The chip polls its interrupt detectors in an instruction's last cycle, so
+what decides the next boundary is the requests as they stood at the end of
+the second-to-last cycle (NESdev wiki, "CPU interrupts", which works from the
+visual6502 transistor-level simulation). A board raises interrupts from
+inside its bus callbacks, at the cycle the device changes the line, and gets
+exactly that:
+
+- a request made during an instruction's last bus access is left for the
+  next instruction's poll, so one more instruction runs first; an IRQ seen
+  by the poll and released in the last cycle is still taken;
+- BRK, an interrupt entry and reset do not poll: one instruction runs after
+  them before anything requested since is taken (`CPUState.skipped_poll`);
+- a request the host makes between steps is taken at the next boundary, as
+  if made in time for the last instruction's poll, except after those three.
+
+The requests the poll saw, where they differ from the requests now, are in
+`CPUState.polled_maskable_interrupt` and `polled_non_maskable_interrupt`.
+The core pays for this only when a request changes during a step: it then
+watches for one more bus access, which tells it whether the change came
+before the last cycle.
+
+Three more timing rules come from the same poll:
 
 - CLI, SEI and PLP change I after the poll, so the next boundary decides on
   the old I: an IRQ waiting behind a CLI is taken one instruction late, and
@@ -110,8 +129,9 @@ interrupts"):
   this across a capture and restore.
 - RTI restores P before the poll, so an RTI that clears I lets a waiting IRQ
   in at once.
-- An NMI that arrives during BRK or an IRQ entry, before the vector is read,
-  takes it over: the frame already pushed stays, the NMI vector is used.
+- An NMI that arrives by the end of cycle 4 of BRK or an IRQ entry (the PCL
+  push) takes it over: the frame already pushed stays, the NMI vector is
+  used. One later than that waits for the handler's first instruction.
 
 ## JAM
 

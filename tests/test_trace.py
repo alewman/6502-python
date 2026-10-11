@@ -82,7 +82,7 @@ def test_every_cpu_state_field_participates_in_comparison() -> None:
     record = _history(NOP, NOP)[0]
     for field in fields(CPUState):
         current = getattr(record.before, field.name)
-        if field.name == "polled_i":
+        if current is None:  # polled_i and the polled requests: None or a bool
             changed = True
         elif type(current) is bool:
             changed = not current

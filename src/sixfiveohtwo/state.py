@@ -40,6 +40,16 @@ class CPUState:
     #: The I flag the last instruction's interrupt poll saw, when that differs
     #: in timing from P: set by CLI, SEI and PLP for exactly one boundary.
     polled_i: bool | None = None
+    #: The IRQ line and the NMI latch as the last poll saw them, at the end
+    #: of the instruction's second-to-last cycle, when that is not what the
+    #: two requests above say (a bus callback changed one in the last cycle);
+    #: None when the poll agrees with them.
+    polled_maskable_interrupt: bool | None = None
+    polled_non_maskable_interrupt: bool | None = None
+    #: The last step was BRK, an interrupt entry or reset, which do not poll:
+    #: the next boundary takes nothing, and requests made since wait for the
+    #: next instruction's poll.
+    skipped_poll: bool = False
 
     def __post_init__(self) -> None:
         for name in ("a", "x", "y", "s", "p"):
@@ -50,10 +60,12 @@ class CPUState:
             "reset_pending",
             "maskable_interrupt_pending",
             "non_maskable_interrupt_pending",
+            "skipped_poll",
         ):
             _require_bool(name, getattr(self, name))
-        if self.polled_i is not None:
-            _require_bool("polled_i", self.polled_i)
+        for name in ("polled_i", "polled_maskable_interrupt", "polled_non_maskable_interrupt"):
+            if getattr(self, name) is not None:
+                _require_bool(name, getattr(self, name))
         if self.p & 0x30 != 0x20:
             raise ValueError("p must have bit 5 set and B (bit 4) clear")
 

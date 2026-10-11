@@ -13,33 +13,33 @@ class LoadMixin:
 
     def _op_lda(self, address: int) -> None:
         """LDA -- M -> A (PM p. B-17)."""
-        a = self.read_byte(address)
+        a = self._read(address)
         self.a = a
         self.p = (self.p & ~(N | Z)) | NZ[a]
 
     def _op_ldx(self, address: int) -> None:
         """LDX -- M -> X (PM p. B-18)."""
-        x = self.read_byte(address)
+        x = self._read(address)
         self.x = x
         self.p = (self.p & ~(N | Z)) | NZ[x]
 
     def _op_ldy(self, address: int) -> None:
         """LDY -- M -> Y (PM p. B-18)."""
-        y = self.read_byte(address)
+        y = self._read(address)
         self.y = y
         self.p = (self.p & ~(N | Z)) | NZ[y]
 
     def _op_sta(self, address: int) -> None:
         """STA -- A -> M (PM p. B-26)."""
-        self.write_byte(address, self.a)
+        self._write(address, self.a)
 
     def _op_stx(self, address: int) -> None:
         """STX -- X -> M (PM p. B-26)."""
-        self.write_byte(address, self.x)
+        self._write(address, self.x)
 
     def _op_sty(self, address: int) -> None:
         """STY -- Y -> M (PM p. B-27)."""
-        self.write_byte(address, self.y)
+        self._write(address, self.y)
 
     def _op_tax(self) -> None:
         """TAX -- A -> X (PM p. B-27)."""

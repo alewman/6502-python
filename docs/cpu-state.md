@@ -14,11 +14,18 @@ without calling the host's bus.
 | `maskable_interrupt_pending` | the IRQ line is asserted (a level) |
 | `non_maskable_interrupt_pending` | an NMI edge is latched and not yet taken |
 | `polled_i` | after CLI, SEI or PLP: the I flag the chip's interrupt poll saw, which decides the next boundary; `None` otherwise |
+| `polled_maskable_interrupt` | the IRQ line as the last poll saw it, when a bus callback changed it in the instruction's last cycle; `None` when the poll agrees with `maskable_interrupt_pending` |
+| `polled_non_maskable_interrupt` | the same for the NMI latch |
+| `skipped_poll` | the last step was BRK, an interrupt entry or reset, which do not poll: the next boundary takes nothing |
 
-`polled_i` is the one piece of internal state a register dump does not show.
-CLI, SEI and PLP change I after the poll, so for one boundary the decision
-uses the old I (docs/validation.md; NESdev "CPU interrupts"). Without it a
-restored CPU could take an IRQ one instruction early or late.
+The four `polled`/`skipped` fields are the internal state a register dump
+does not show. The chip polls in an instruction's last cycle, so for one
+boundary the decision uses what the poll saw: the old I after CLI, SEI or
+PLP, the requests from before a change made in the last cycle, and nothing
+at all after BRK, an interrupt entry or reset (docs/start-here.md; NESdev
+"CPU interrupts"). Without them a restored CPU could take an interrupt one
+instruction early or late. A state built with only the two `pending` fields
+takes them at the next boundary, as a request made between steps is.
 
 ## P, bit 5 and B
 
