@@ -71,6 +71,16 @@ family's reference core, and made correct to the bus cycle.
   fetches beside "6502" from the same pinned revision. The decimal adjust is
   one class attribute, `_decimal_mode`, which the arithmetic handlers pass to
   `add`/`subtract`; no handler is duplicated.
+- **Interrupts polled at the end of the second-to-last cycle, as the chip
+  does**: a request a bus callback makes in an instruction's last cycle waits
+  for the next instruction's poll; an IRQ the poll saw is taken though
+  released in the last cycle; BRK, interrupt entries and reset do not poll;
+  the NMI hijack of BRK or an IRQ is decided after cycle 4, not 5. A request
+  made between steps is still taken at the next boundary. `CPUState` (and
+  trace schema 1) gains `polled_maskable_interrupt`,
+  `polled_non_maskable_interrupt` and `skipped_poll`. The core watches the
+  bus only after a mid-step request, so the cost is two checks a step
+  (CPython about x0.92, PyPy about x0.97).
 - **Interrupt timing the chip has and the old core did not**: CLI, SEI and
   PLP delay a waiting IRQ by one instruction; RTI's restored I counts at
   once; an NMI arriving during BRK or an IRQ entry takes it over; IRQ is a

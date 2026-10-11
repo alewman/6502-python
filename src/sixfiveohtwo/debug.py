@@ -138,10 +138,14 @@ def next_boundary(state: CPUState) -> BoundaryKind:
         return BoundaryKind.RESET
     if state.halted:
         return BoundaryKind.JAM_IDLE
-    if state.non_maskable_interrupt_pending:
+    if state.skipped_poll:
+        return BoundaryKind.INSTRUCTION
+    nmi = state.polled_non_maskable_interrupt
+    if state.non_maskable_interrupt_pending if nmi is None else nmi:
         return BoundaryKind.NMI
+    irq = state.polled_maskable_interrupt
     masked = bool(state.p & I) if state.polled_i is None else state.polled_i
-    if state.maskable_interrupt_pending and not masked:
+    if (state.maskable_interrupt_pending if irq is None else irq) and not masked:
         return BoundaryKind.IRQ
     return BoundaryKind.INSTRUCTION
 
