@@ -89,12 +89,21 @@ def _flags(value: int) -> str:
 
 def _format_state(state: CPUState) -> tuple[str, ...]:
     polled = "-" if state.polled_i is None else str(int(state.polled_i))
+    seen = "".join(
+        f" POLLED_{name}={'-' if value is None else int(value)}"
+        for name, value in (
+            ("NMI", state.polled_non_maskable_interrupt),
+            ("IRQ", state.polled_maskable_interrupt),
+        )
+        if value is not None
+    )
+    skipped = " NO_POLL" if state.skipped_poll else ""
     return (
         f"PC={state.pc:04X} A={state.a:02X} X={state.x:02X} Y={state.y:02X} "
         f"S={state.s:02X} P={state.p:02X} {_flags(state.p)}",
         f"JAM={int(state.halted)} RESET={int(state.reset_pending)} "
         f"NMI={int(state.non_maskable_interrupt_pending)} "
-        f"IRQ={int(state.maskable_interrupt_pending)} POLLED_I={polled}",
+        f"IRQ={int(state.maskable_interrupt_pending)} POLLED_I={polled}{seen}{skipped}",
     )
 
 

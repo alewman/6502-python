@@ -26,44 +26,44 @@ class UndocumentedMixin:
 
     def _op_slo(self, address: int) -> None:
         """SLO -- ASL M, then A OR M -> A (NMS p. 7)."""
-        value, p = _asl(self._modify(address, self.read_byte(address)), self.p)
-        self.write_byte(address, value)
+        value, p = _asl(self._modify(address, self._read(address)), self.p)
+        self._write(address, value)
         a = self.a | value
         self.a = a
         self.p = (p & ~(N | Z)) | NZ[a]
 
     def _op_rla(self, address: int) -> None:
         """RLA -- ROL M, then A AND M -> A (NMS p. 9)."""
-        value, p = _rol(self._modify(address, self.read_byte(address)), self.p)
-        self.write_byte(address, value)
+        value, p = _rol(self._modify(address, self._read(address)), self.p)
+        self._write(address, value)
         a = self.a & value
         self.a = a
         self.p = (p & ~(N | Z)) | NZ[a]
 
     def _op_sre(self, address: int) -> None:
         """SRE -- LSR M, then A EOR M -> A (NMS p. 11)."""
-        value, p = _lsr(self._modify(address, self.read_byte(address)), self.p)
-        self.write_byte(address, value)
+        value, p = _lsr(self._modify(address, self._read(address)), self.p)
+        self._write(address, value)
         a = self.a ^ value
         self.a = a
         self.p = (p & ~(N | Z)) | NZ[a]
 
     def _op_rra(self, address: int) -> None:
         """RRA -- ROR M, then A + M + C -> A, decimal mode included (NMS p. 14)."""
-        value, p = _ror(self._modify(address, self.read_byte(address)), self.p)
-        self.write_byte(address, value)
+        value, p = _ror(self._modify(address, self._read(address)), self.p)
+        self._write(address, value)
         self.a, self.p = add(self.a, value, p, p & self._decimal_mode)
 
     def _op_dcp(self, address: int) -> None:
         """DCP -- DEC M, then CMP M (NMS p. 22)."""
-        value = (self._modify(address, self.read_byte(address)) - 1) & 0xFF
-        self.write_byte(address, value)
+        value = (self._modify(address, self._read(address)) - 1) & 0xFF
+        self._write(address, value)
         self._compare(self.a, value)
 
     def _op_isc(self, address: int) -> None:
         """ISC -- INC M, then A - M - (1 - C) -> A, decimal mode included (NMS p. 26)."""
-        value = (self._modify(address, self.read_byte(address)) + 1) & 0xFF
-        self.write_byte(address, value)
+        value = (self._modify(address, self._read(address)) + 1) & 0xFF
+        self._write(address, value)
         p = self.p
         self.a, self.p = subtract(self.a, value, p, p & self._decimal_mode)
 
@@ -71,18 +71,18 @@ class UndocumentedMixin:
 
     def _op_sax(self, address: int) -> None:
         """SAX -- A AND X -> M, no flags (NMS p. 16)."""
-        self.write_byte(address, self.a & self.x)
+        self._write(address, self.a & self.x)
 
     def _op_lax(self, address: int) -> None:
         """LAX -- M -> A and X (NMS p. 19)."""
-        value = self.read_byte(address)
+        value = self._read(address)
         self.a = value
         self.x = value
         self.p = (self.p & ~(N | Z)) | NZ[value]
 
     def _op_las(self, address: int) -> None:
         """LAS -- M AND S -> A, X and S (NMS p. 41)."""
-        value = self.read_byte(address) & self.s
+        value = self._read(address) & self.s
         self.a = value
         self.x = value
         self.s = value
@@ -92,17 +92,17 @@ class UndocumentedMixin:
 
     def _op_anc(self, address: int) -> None:
         """ANC -- A AND #imm -> A, then N -> C (NMS p. 28)."""
-        a = self.a & self.read_byte(address)
+        a = self.a & self._read(address)
         self.a = a
         self.p = (self.p & ~(N | Z | C)) | NZ[a] | (a >> 7)
 
     def _op_alr(self, address: int) -> None:
         """ALR -- A AND #imm, then LSR A (NMS p. 30)."""
-        self.a, self.p = _lsr(self.a & self.read_byte(address), self.p)
+        self.a, self.p = _lsr(self.a & self._read(address), self.p)
 
     def _op_arr(self, address: int) -> None:
         """ARR -- A AND #imm, then ROR A, with its own C and V (NMS pp. 32, 78)."""
-        value = self.a & self.read_byte(address)
+        value = self.a & self._read(address)
         p = self.p
         result = (value >> 1) | ((p & C) << 7)
         # N and Z from the rotated value; V from bits 6 and 5 of it.
@@ -122,7 +122,7 @@ class UndocumentedMixin:
 
     def _op_sbx(self, address: int) -> None:
         """SBX -- (A AND X) - #imm -> X, C as for CMP, no decimal (NMS p. 35)."""
-        difference = (self.a & self.x) - self.read_byte(address)
+        difference = (self.a & self.x) - self._read(address)
         x = difference & 0xFF
         self.x = x
         self.p = (self.p & ~(N | Z | C)) | NZ[x] | (C if difference >= 0 else 0)
@@ -130,19 +130,19 @@ class UndocumentedMixin:
     def _op_usbc(self, address: int) -> None:
         """USBC -- $EB, the same operation as SBC #imm (NMS p. 40)."""
         p = self.p
-        self.a, self.p = subtract(self.a, self.read_byte(address), p, p & self._decimal_mode)
+        self.a, self.p = subtract(self.a, self._read(address), p, p & self._decimal_mode)
 
     # -- unstable: magic constant (NMS p. 60) ----------------------------
 
     def _op_ane(self, address: int) -> None:
         """ANE -- (A OR CONST) AND X AND #imm -> A (NMS p. 61)."""
-        a = (self.a | MAGIC) & self.x & self.read_byte(address)
+        a = (self.a | MAGIC) & self.x & self._read(address)
         self.a = a
         self.p = (self.p & ~(N | Z)) | NZ[a]
 
     def _op_lxa(self, address: int) -> None:
         """LXA -- (A OR CONST) AND #imm -> A and X (NMS p. 64)."""
-        a = (self.a | MAGIC) & self.read_byte(address)
+        a = (self.a | MAGIC) & self._read(address)
         self.a = a
         self.x = a
         self.p = (self.p & ~(N | Z)) | NZ[a]
@@ -157,7 +157,7 @@ class UndocumentedMixin:
         value &= ((base >> 8) + 1) & 0xFF
         if (address ^ base) & 0xFF00:
             address = (value << 8) | (address & 0xFF)
-        self.write_byte(address, value)
+        self._write(address, value)
 
     def _op_sha(self, address: int) -> None:
         """SHA -- A AND X AND (H + 1) -> M (NMS p. 50)."""
@@ -180,11 +180,11 @@ class UndocumentedMixin:
 
     def _op_nop_read(self, address: int) -> None:
         """NOP with an operand -- reads M and discards it (NMS p. 43)."""
-        self.read_byte(address)
+        self._read(address)
 
     def _op_jam(self) -> None:
         """JAM -- the processor stops; only a reset restarts it (NMS p. 47)."""
         self._read_pc()
         for address in JAM_READS:
-            self.read_byte(address)
+            self._read(address)
         self.halted = True

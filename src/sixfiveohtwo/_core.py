@@ -27,6 +27,15 @@ NZ = tuple((value & N) | (0 if value else Z) for value in range(256))
 
 STACK = 0x0100  # the stack is page one: S is the low byte (PM section 8.3, p. 112)
 
+# Interrupt requests the host has made, as bits of one int so that a snapshot
+# of both is one assignment: the IRQ line (a level) and the NMI latch (an edge
+# remembered until it is taken).
+IRQ_LINE = 0x01
+NMI_LATCH = 0x02
+#: In _polled only: the last sequence (BRK, an interrupt entry, reset) did
+#: not poll, so nothing is taken until an instruction has run and polled.
+NO_POLL = 0x04
+
 ReadByte = Callable[[int], int]
 WriteByte = Callable[[int, int], None]
 
@@ -53,8 +62,19 @@ class CoreMixin:
         self.p = U | I
         # Interrupt inputs (docs/start-here.md, "Reset and interrupts").
         self._reset_pending = False
-        self._irq = False
-        self._nmi_pending = False
+        self._requests = 0  # IRQ_LINE | NMI_LATCH, as the host has set them
+        # The chip polls its interrupt detectors in an instruction's last
+        # cycle, so what counts is the requests as they stood at the end of
+        # the second-to-last cycle (NESdev, "CPU interrupts", "Detailed
+        # interrupt behavior"). Usually that is the requests as they stand,
+        # and _polled is None. It holds what the poll saw instead, for the
+        # next boundary only, when that differs: a bus callback changed a
+        # request in the last cycle, too late (_deferred, see _request), or
+        # the step was BRK, an interrupt entry or reset, which do not poll
+        # (NO_POLL). A request the host makes between steps is taken at the
+        # next boundary, unless that step did not poll.
+        self._polled: int | None = None
+        self._deferred: int | None = None
         # CLI, SEI and PLP change I after the chip has polled for interrupts,
         # so the next boundary decides on the old I. None: poll P as it is.
         self._polled_i: int | None = None
@@ -64,12 +84,42 @@ class CoreMixin:
         # indexed read, a branch taken.
         self._extra = 0
 
+    # -- interrupt requests ------------------------------------------------
+
+    def _request(self, requests: int) -> None:
+        """Change the requests, and arrange to learn whether a bus access follows.
+
+        The first change since the last access keeps the requests from
+        before it in _deferred and routes the next access through
+        _confirm. If that access comes in the same step, the change was
+        before the last cycle and the poll sees it; if the step ends first,
+        the poll saw _deferred. Accesses cost nothing extra otherwise.
+        """
+        if self._deferred is None:
+            self._deferred = self._requests
+            self._read = self._read_confirming
+            self._write = self._write_confirming
+        self._requests = requests
+
+    def _confirm(self) -> None:
+        self._deferred = None
+        self._read = self._read_byte
+        self._write = self._write_byte
+
+    def _read_confirming(self, address: int) -> int:
+        self._confirm()
+        return self._read_byte(address)
+
+    def _write_confirming(self, address: int, value: int) -> None:
+        self._confirm()
+        self._write_byte(address, value)
+
     # -- fetch -------------------------------------------------------------
 
     def _fetch(self) -> int:
         pc = self.pc
         self.pc = (pc + 1) & 0xFFFF
-        return self.read_byte(pc)
+        return self._read(pc)
 
     def _fetch_word(self) -> int:
         low = self._fetch()  # the 6502 is little-endian: low byte first
@@ -77,7 +127,7 @@ class CoreMixin:
 
     def _read_pc(self) -> None:
         """The dummy read of every one-byte instruction's second cycle (HM p. A-2)."""
-        self.read_byte(self.pc)
+        self._read(self.pc)
 
     # -- effective addresses, cycle by cycle (HM Appendix A) ---------------
     # Each returns the address the instruction's own read, write or
@@ -95,12 +145,12 @@ class CoreMixin:
 
     def _ea_zpx(self) -> int:
         base = self._fetch()
-        self.read_byte(base)  # the unindexed address is read and discarded (HM p. A-4)
+        self._read(base)  # the unindexed address is read and discarded (HM p. A-4)
         return (base + self.x) & 0xFF  # page zero wraps: never carries to page one
 
     def _ea_zpy(self) -> int:
         base = self._fetch()
-        self.read_byte(base)
+        self._read(base)
         return (base + self.y) & 0xFF
 
     def _ea_abs(self) -> int:
@@ -113,7 +163,7 @@ class CoreMixin:
         # Writes and read-modify-writes always spend that cycle (HM pp. A-6, A-9).
         address = (base + index) & 0xFFFF
         if write or (address ^ base) & 0xFF00:
-            self.read_byte((base & 0xFF00) | (address & 0xFF))
+            self._read((base & 0xFF00) | (address & 0xFF))
             if not write:
                 self._extra = 1
         return address
@@ -134,15 +184,15 @@ class CoreMixin:
         # (zp,X): the pointer lives in page zero at zp+X, both bytes wrapping
         # within page zero (HM p. A-3).
         base = self._fetch()
-        self.read_byte(base)
+        self._read(base)
         pointer = (base + self.x) & 0xFF
-        low = self.read_byte(pointer)
-        return (self.read_byte((pointer + 1) & 0xFF) << 8) | low
+        low = self._read(pointer)
+        return (self._read((pointer + 1) & 0xFF) << 8) | low
 
     def _izy_base(self) -> int:
         pointer = self._fetch()
-        low = self.read_byte(pointer)
-        return (self.read_byte((pointer + 1) & 0xFF) << 8) | low
+        low = self._read(pointer)
+        return (self._read((pointer + 1) & 0xFF) << 8) | low
 
     def _ea_izy(self) -> int:
         return self._indexed(self._izy_base(), self.y, False)  # (zp),Y: HM p. A-5
@@ -154,14 +204,14 @@ class CoreMixin:
 
     def _push(self, value: int) -> None:
         s = self.s
-        self.write_byte(STACK | s, value)
+        self._write(STACK | s, value)
         self.s = (s - 1) & 0xFF
 
     def _pull(self) -> int:
         s = (self.s + 1) & 0xFF
         self.s = s
-        return self.read_byte(STACK | s)
+        return self._read(STACK | s)
 
     def _read_stack(self) -> None:
         """The dummy read of the stack before a pull, or during JSR (HM p. A-10)."""
-        self.read_byte(STACK | self.s)
+        self._read(STACK | self.s)

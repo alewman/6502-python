@@ -7,7 +7,7 @@ IRQ already under way -- is from the NESdev wiki's "CPU interrupts" page
 (documentation tier; it cites the visual6502 transistor-level simulation).
 """
 
-from sixfiveohtwo._core import STACK, B, C, D, I, N, U, V, Z
+from sixfiveohtwo._core import NMI_LATCH, NO_POLL, STACK, B, C, D, I, N, U, V, Z
 
 VECTOR_NMI = 0xFFFA
 VECTOR_RESET = 0xFFFC
@@ -28,10 +28,10 @@ class ControlMixin:
         if not taken:
             return
         pc = self.pc
-        self.read_byte(pc)
+        self._read(pc)
         target = (pc + offset - ((offset & 0x80) << 1)) & 0xFFFF
         if (target ^ pc) & 0xFF00:
-            self.read_byte((pc & 0xFF00) | (target & 0xFF))
+            self._read((pc & 0xFF00) | (target & 0xFF))
             self._extra = 2
         else:
             self._extra = 1
@@ -78,9 +78,9 @@ class ControlMixin:
     def _op_jmp_ind(self) -> None:
         """JMP (abs) -- the pointer's high byte never carries into the next page (PM p. B-16)."""
         pointer = self._fetch_word()
-        low = self.read_byte(pointer)
+        low = self._read(pointer)
         # JMP ($C0FF) reads $C0FF and $C000 (NMS p. 94; HM p. A-12).
-        high = self.read_byte((pointer & 0xFF00) | ((pointer + 1) & 0xFF))
+        high = self._read((pointer & 0xFF00) | ((pointer + 1) & 0xFF))
         self.pc = (high << 8) | low
 
     def _op_jsr(self) -> None:
@@ -94,7 +94,7 @@ class ControlMixin:
         pc = self.pc
         self._push(pc >> 8)
         self._push(pc & 0xFF)
-        self.pc = (self.read_byte(pc) << 8) | low
+        self.pc = (self._read(pc) << 8) | low
 
     def _op_rts(self) -> None:
         """RTS -- pull PC, then PC + 1 -> PC (PM p. B-23)."""
@@ -102,7 +102,7 @@ class ControlMixin:
         self._read_stack()
         low = self._pull()
         pc = (self._pull() << 8) | low
-        self.read_byte(pc)  # the increment's cycle reads the pulled address (HM p. A-12)
+        self._read(pc)  # the increment's cycle reads the pulled address (HM p. A-12)
         self.pc = (pc + 1) & 0xFFFF
 
     # -- stack -------------------------------------------------------------
@@ -187,15 +187,19 @@ class ControlMixin:
         pc = self.pc
         self._push(pc >> 8)
         self._push(pc & 0xFF)
+        if vector != VECTOR_NMI and self._requests & NMI_LATCH:
+            # The vector is chosen after cycle 4, the PCL push: an NMI by
+            # then takes it over, BRK's or the IRQ's frame with NMI's vector
+            # (NESdev, "CPU interrupts", "Interrupt hijacking").
+            self._requests &= ~NMI_LATCH
+            vector = VECTOR_NMI
         self._push(pushed_p)
         self.p |= I
-        if vector != VECTOR_NMI and self._nmi_pending:
-            # An NMI arriving before the vector fetch takes it over: BRK's
-            # or the IRQ's frame, NMI's vector (NESdev, "Interrupt hijacking").
-            self._nmi_pending = False
-            vector = VECTOR_NMI
-        low = self.read_byte(vector)
-        self.pc = (self.read_byte(vector + 1) << 8) | low
+        low = self._read(vector)
+        self.pc = (self._read(vector + 1) << 8) | low
+        # The sequence does not poll: the handler's first instruction runs
+        # before any other interrupt is taken (NESdev, "CPU interrupts").
+        self._deferred = NO_POLL
 
     def _op_brk(self) -> None:
         """BRK -- push PC + 2 and P with B set, jump through $FFFE (PM p. B-8)."""
@@ -218,11 +222,13 @@ class ControlMixin:
         # second read -- see docs/validation.md, "Divergences").
         self._polled_i = None
         pc = self.pc
-        self.read_byte(pc)
-        self.read_byte(pc)
+        self._read(pc)
+        self._read(pc)
         if vector == VECTOR_NMI:
-            self._nmi_pending = False
+            self._requests &= ~NMI_LATCH
         self._interrupt(vector, (self.p | U) & ~B)
+        self._polled = NO_POLL
+        self._deferred = None
         return 7
 
     def _accept_reset(self) -> int:
@@ -235,12 +241,14 @@ class ControlMixin:
         self.halted = False
         self._polled_i = None
         pc = self.pc
-        self.read_byte(pc)
-        self.read_byte(pc)
+        self._read(pc)
+        self._read(pc)
         for _ in range(3):
-            self.read_byte(STACK | self.s)
+            self._read(STACK | self.s)
             self.s = (self.s - 1) & 0xFF
         self.p |= I
-        low = self.read_byte(VECTOR_RESET)
-        self.pc = (self.read_byte(VECTOR_RESET + 1) << 8) | low
+        low = self._read(VECTOR_RESET)
+        self.pc = (self._read(VECTOR_RESET + 1) << 8) | low
+        self._polled = NO_POLL  # like an interrupt sequence, reset does not poll
+        self._deferred = None
         return 7

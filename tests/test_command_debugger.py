@@ -182,7 +182,7 @@ def test_reset_runs_the_seven_cycle_start_sequence() -> None:
     assert debugger.execute("reset").lines == (
         "#0 0200  reset -> PC=0500 +7",
         "PC=0500 A=00 X=00 Y=00 S=FC P=24 -----I--",
-        "JAM=0 RESET=0 NMI=0 IRQ=0 POLLED_I=-",
+        "JAM=0 RESET=0 NMI=0 IRQ=0 POLLED_I=- NO_POLL",
     )
     assert not machine.cpu.reset_pending
 

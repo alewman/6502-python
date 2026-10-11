@@ -79,28 +79,28 @@ class ALUMixin:
     def _op_adc(self, address: int) -> None:
         """ADC -- A + M + C -> A, C (PM p. B-3)."""
         p = self.p
-        self.a, self.p = add(self.a, self.read_byte(address), p, p & self._decimal_mode)
+        self.a, self.p = add(self.a, self._read(address), p, p & self._decimal_mode)
 
     def _op_sbc(self, address: int) -> None:
         """SBC -- A - M - (1 - C) -> A (PM p. B-24)."""
         p = self.p
-        self.a, self.p = subtract(self.a, self.read_byte(address), p, p & self._decimal_mode)
+        self.a, self.p = subtract(self.a, self._read(address), p, p & self._decimal_mode)
 
     def _op_and(self, address: int) -> None:
         """AND -- A AND M -> A (PM p. B-3)."""
-        a = self.a & self.read_byte(address)
+        a = self.a & self._read(address)
         self.a = a
         self.p = (self.p & ~(N | Z)) | NZ[a]
 
     def _op_ora(self, address: int) -> None:
         """ORA -- A OR M -> A (PM p. B-20)."""
-        a = self.a | self.read_byte(address)
+        a = self.a | self._read(address)
         self.a = a
         self.p = (self.p & ~(N | Z)) | NZ[a]
 
     def _op_eor(self, address: int) -> None:
         """EOR -- A EOR M -> A (PM p. B-14)."""
-        a = self.a ^ self.read_byte(address)
+        a = self.a ^ self._read(address)
         self.a = a
         self.p = (self.p & ~(N | Z)) | NZ[a]
 
@@ -114,19 +114,19 @@ class ALUMixin:
 
     def _op_cmp(self, address: int) -> None:
         """CMP -- A - M, flags only (PM p. B-11)."""
-        self._compare(self.a, self.read_byte(address))
+        self._compare(self.a, self._read(address))
 
     def _op_cpx(self, address: int) -> None:
         """CPX -- X - M, flags only (PM p. B-12)."""
-        self._compare(self.x, self.read_byte(address))
+        self._compare(self.x, self._read(address))
 
     def _op_cpy(self, address: int) -> None:
         """CPY -- Y - M, flags only (PM p. B-12)."""
-        self._compare(self.y, self.read_byte(address))
+        self._compare(self.y, self._read(address))
 
     def _op_bit(self, address: int) -> None:
         """BIT -- A AND M sets Z; M7 -> N, M6 -> V (PM p. B-6)."""
-        value = self.read_byte(address)
+        value = self._read(address)
         p = (self.p & ~(N | V | Z)) | (value & (N | V))
         if not self.a & value:
             p |= Z
