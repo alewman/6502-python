@@ -69,6 +69,14 @@ class MOS6502(
 
     _table: list[Entry]
 
+    #: The chip-dependent constant ANE ($8B) and LXA ($AB) OR into A before
+    #: their AND: (A OR CONST) AND X AND #imm, and (A OR CONST) AND #imm (NMS
+    #: pp. 60-64). It varies between chips and with temperature; $EE is the
+    #: value SingleStepTests records. A host modelling a particular console
+    #: sets the instance's attributes (docs/undocumented-behavior.md).
+    ane_constant = 0xEE
+    lxa_constant = 0xEE
+
     def __init__(self, read_byte: ReadByte, write_byte: WriteByte) -> None:
         for name, bus in zip(_BUS, (read_byte, write_byte), strict=True):
             if not callable(bus):

@@ -71,6 +71,12 @@ family's reference core, and made correct to the bus cycle.
   fetches beside "6502" from the same pinned revision. The decimal adjust is
   one class attribute, `_decimal_mode`, which the arithmetic handlers pass to
   `add`/`subtract`; no handler is duplicated.
+- **`ane_constant` and `lxa_constant`, per CPU.** ANE and LXA's magic
+  constant varies between chips (NMS pp. 60-64), so it is now an attribute
+  a host sets on its CPU instead of a module constant; both default to $EE,
+  SingleStepTests' value. famicom-python found the need: blargg's
+  `instr_test-v5` `03-immediate`, whose CRCs were taken on an NES, passes only
+  with LXA's constant at $FF.
 - **Interrupts polled at the end of the second-to-last cycle, as the chip
   does**: a request a bus callback makes in an instruction's last cycle waits
   for the next instruction's poll; an IRQ the poll saw is taken though

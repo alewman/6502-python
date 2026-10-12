@@ -19,7 +19,8 @@ NMS page.
 | magic constant | ANE, LXA: A is ORed with a chip-dependent constant first | pp. 60-66 |
 
 Choices the core makes where the chip is not repeatable are listed in
-docs/validation.md, "Divergences": the magic constant is $EE, and the
+docs/validation.md, "Divergences": the magic constant is $EE unless the host
+sets `ane_constant` or `lxa_constant` on its CPU, and the
 RDY-dependent behaviour of the unstable stores cannot arise because the core
 has no RDY input.
 

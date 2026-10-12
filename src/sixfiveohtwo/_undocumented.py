@@ -2,17 +2,15 @@
 
 Every one does something repeatable enough to be tested, and SingleStepTests
 records all of them. Names and behaviour are NMS's; the "magic constant" of
-ANE and LXA, which varies from chip to chip and with temperature (NMS p. 60),
-is fixed at $EE, the value SingleStepTests records. See
+ANE and LXA varies from chip to chip and with temperature (NMS p. 60), so it
+is a setting of each CPU, ``ane_constant`` and ``lxa_constant``, $EE by
+default, the value SingleStepTests records. See
 docs/undocumented-behavior.md.
 """
 
 from sixfiveohtwo._alu import add, subtract
 from sixfiveohtwo._core import NZ, C, N, V, Z
 from sixfiveohtwo._shifts import _asl, _lsr, _rol, _ror
-
-#: ANE and LXA compute (A OR CONST) AND ...; CONST is chip-dependent (NMS p. 61).
-MAGIC = 0xEE
 
 #: What a JAMmed CPU puts on the address bus after its second cycle, as the
 #: SingleStepTests corpus (emulator-derived) records it.
@@ -136,13 +134,13 @@ class UndocumentedMixin:
 
     def _op_ane(self, address: int) -> None:
         """ANE -- (A OR CONST) AND X AND #imm -> A (NMS p. 61)."""
-        a = (self.a | MAGIC) & self.x & self._read(address)
+        a = (self.a | self.ane_constant) & self.x & self._read(address)
         self.a = a
         self.p = (self.p & ~(N | Z)) | NZ[a]
 
     def _op_lxa(self, address: int) -> None:
         """LXA -- (A OR CONST) AND #imm -> A and X (NMS p. 64)."""
-        a = (self.a | MAGIC) & self._read(address)
+        a = (self.a | self.lxa_constant) & self._read(address)
         self.a = a
         self.x = a
         self.p = (self.p & ~(N | Z)) | NZ[a]
