@@ -81,7 +81,9 @@ family's reference core, and made correct to the bus cycle.
   does**: a request a bus callback makes in an instruction's last cycle waits
   for the next instruction's poll; an IRQ the poll saw is taken though
   released in the last cycle; BRK, interrupt entries and reset do not poll;
-  the NMI hijack of BRK or an IRQ is decided after cycle 4, not 5. A request
+  the NMI hijack of BRK or an IRQ is decided after cycle 4, not 5; a taken
+  branch polls at the end of cycle 1, and across a page also at the end of
+  cycle 3, not at the end of cycle 2. A request
   made between steps is still taken at the next boundary. `CPUState` (and
   trace schema 1) gains `polled_maskable_interrupt`,
   `polled_non_maskable_interrupt` and `skipped_poll`. The core watches the

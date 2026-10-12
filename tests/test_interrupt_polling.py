@@ -287,3 +287,68 @@ def test_replacing_the_bus_callables_keeps_the_sampling() -> None:
     assert machine.step() == 7
     session.close()
     assert machine.cpu.read_byte == machine.read_byte
+
+
+# Branches poll at the end of cycle 1, and a taken one that crosses a page
+# also at the end of cycle 3; seen at either, the interrupt is taken (NESdev,
+# "Branch instructions and interrupts"). blargg's 5-branch_delays_irq and
+# AccuracyCoin's "Interrupt Flag Latency" judge this on a board.
+BNE_SAME_PAGE = ((0xD0, 0x10), _set(p=0x20), 3, 0x0212)  # Z clear: taken, to $0212
+BNE_ACROSS = ((0xD0, 0xF0), _set(p=0x20, m01F2=NOP), 4, 0x01F2)  # back across to $01F2
+
+
+@pytest.mark.parametrize(("cycle", "taken_after"), [(1, True), (2, False), (3, False)])
+def test_a_taken_branch_on_the_same_page_polls_only_at_the_end_of_cycle_1(
+    cycle: int, taken_after: bool
+) -> None:
+    program, setup, cycles, after = BNE_SAME_PAGE
+    machine = ScriptedHost(program)
+    setup(machine)
+    assert machine.step(**{f"cycle_{cycle}": raise_irq}) == cycles
+    assert machine.cpu.pc == after
+    if taken_after:
+        assert machine.step() == 7
+    else:
+        assert machine.step() == 2, "the branch delays the IRQ by one instruction"
+        assert machine.step() == 7
+    assert machine.cpu.pc == IRQ_HANDLER
+
+
+@pytest.mark.parametrize(("cycle", "taken_after"), [(1, True), (2, True), (3, True), (4, False)])
+def test_a_taken_branch_across_a_page_polls_at_the_end_of_cycle_1_or_3(
+    cycle: int, taken_after: bool
+) -> None:
+    program, setup, cycles, after = BNE_ACROSS
+    machine = ScriptedHost(program)
+    setup(machine)
+    assert machine.step(**{f"cycle_{cycle}": raise_irq}) == cycles
+    assert machine.cpu.pc == after
+    assert machine.step() == (7 if taken_after else 2)
+
+
+def test_an_irq_seen_only_at_cycle_1_of_a_branch_across_a_page_is_taken() -> None:
+    program, setup, cycles, _ = BNE_ACROSS
+    machine = ScriptedHost(program)
+    setup(machine)
+    assert machine.step(cycle_1=raise_irq, cycle_2=release_irq) == cycles
+    assert machine.step() == 7, "detected at the first polling point only"
+
+
+def test_an_irq_released_in_cycle_2_of_a_same_page_branch_is_still_taken() -> None:
+    program, setup, cycles, _ = BNE_SAME_PAGE
+    machine = ScriptedHost(program)
+    setup(machine)
+    assert machine.step(cycle_1=raise_irq, cycle_2=release_irq) == cycles
+    assert machine.step() == 7
+
+
+def test_an_nmi_in_cycle_2_of_a_same_page_branch_waits_one_instruction() -> None:
+    program, setup, _, after = BNE_SAME_PAGE
+    machine = ScriptedHost(program)
+    setup(machine)
+    machine.cpu.p |= 0x04
+    machine.step(cycle_2=raise_nmi)
+    assert machine.step() == 2
+    assert machine.cpu.pc == after + 1
+    assert machine.step() == 7
+    assert machine.cpu.pc == NMI_HANDLER

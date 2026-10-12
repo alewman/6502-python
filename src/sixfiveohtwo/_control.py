@@ -24,6 +24,13 @@ class ControlMixin:
         # offset is added to PCL, and one more reading PCH:new-PCL when that
         # crosses a page (NMS p. 87; HM p. A-13 lists the first read at the
         # target instead: see docs/validation.md, "Divergences").
+        #
+        # Its interrupt poll is its own (NESdev, "CPU interrupts", "Branch
+        # instructions and interrupts"): always at the end of cycle 1, never
+        # at the end of cycle 2 of a taken branch, and at the end of cycle 3
+        # of one that crosses a page; seen at either point, it is taken. Not
+        # taken, cycle 1 is the second-to-last and the usual rule holds.
+        early = self._requests  # as they stand at the end of cycle 1
         offset = self._fetch()
         if not taken:
             return
@@ -33,8 +40,12 @@ class ControlMixin:
         if (target ^ pc) & 0xFF00:
             self._read((pc & 0xFF00) | (target & 0xFF))
             self._extra = 2
+            # The usual poll, at the end of cycle 3, or the early one.
+            deferred = self._deferred
+            self._deferred = early | (self._requests if deferred is None else deferred)
         else:
             self._extra = 1
+            self._deferred = early
         self.pc = target
 
     def _op_bpl(self) -> None:
