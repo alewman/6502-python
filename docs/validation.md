@@ -139,9 +139,11 @@ Every place the sources disagree, and what the core does.
    LXA's at $FF, and famicom-python sets that. Programs that depend on it do
    not run reliably on real hardware either.
 7. **SHA, SHX, SHY and TAS store "AND (H+1)" and, across a page, write to the
-   corrupted address.** NMS pp. 48-49 also describes the AND dropping out when
-   RDY or a DMA steals a cycle at the wrong moment; the core has no RDY input,
-   so that case cannot arise.
+   corrupted address.** NMS pp. 48-49 also describes the AND dropping out of
+   the stored value when RDY (a DMA) stretches the cycle before the write. The
+   core has no RDY input; a host says so by setting `dma_stalled` during that
+   read (`tests/test_dma_stall.py`). Its hardware judge is AccuracyCoin's
+   unofficial-opcode error codes 7-C, which famicom-python runs.
 
 ## Limits
 
@@ -153,7 +155,9 @@ Every place the sources disagree, and what the core does.
   can see it, and its board-level judges are blargg's `cpu_interrupts_v2` and
   AccuracyCoin, run by famicom-python. Branches keep their own poll points
   (docs/start-here.md).
-- There is no RDY, SO or bus-halt input, and no 65C02, 65816 or 6510
+- There is no RDY, SO or bus-halt input (a host stretches a read inside its
+  callback, and reports it through `dma_stalled` for the unstable stores), and
+  no 65C02, 65816 or 6510
   variant. The RP2A03 is here only as its 6502 (`RP2A03`): its APU, DMA and
   joypad ports are the host's.
 - The per-cycle timing within an instruction is the order of bus accesses and

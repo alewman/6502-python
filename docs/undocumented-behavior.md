@@ -20,9 +20,11 @@ NMS page.
 
 Choices the core makes where the chip is not repeatable are listed in
 docs/validation.md, "Divergences": the magic constant is $EE unless the host
-sets `ane_constant` or `lxa_constant` on its CPU, and the
-RDY-dependent behaviour of the unstable stores cannot arise because the core
-has no RDY input.
+sets `ane_constant` or `lxa_constant` on its CPU. The unstable stores' RDY
+case (NMS p. 48: a DMA in the cycle before the write drops the AND (H + 1)
+from the stored value, not from a page-crossed address) follows
+`dma_stalled`, which a host with DMA sets on the stretched read; the core has
+no RDY input and never sets it.
 
 Decimal mode applies to the undocumented arithmetic too: RRA adds and ISC
 subtracts with the same NMOS decimal rules as ADC and SBC, and ARR has its
