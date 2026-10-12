@@ -77,6 +77,12 @@ family's reference core, and made correct to the bus cycle.
   SingleStepTests' value. famicom-python found the need: blargg's
   `instr_test-v5` `03-immediate`, whose CRCs were taken on an NES, passes only
   with LXA's constant at $FF.
+- **`dma_stalled`, the host's word that a DMA stretched a read.** SHA, SHX,
+  SHY and TAS then store their value without the AND (H + 1), the
+  page-crossed address keeping it (NMS p. 48). The core has no RDY input; a
+  board running DMA inside its read callback sets it on that read and clears
+  it on the next. famicom-python found the need: AccuracyCoin's unofficial
+  opcode tests (error code 7) check it against hardware.
 - **Interrupts polled at the end of the second-to-last cycle, as the chip
   does**: a request a bus callback makes in an instruction's last cycle waits
   for the next instruction's poll; an IRQ the poll saw is taken though

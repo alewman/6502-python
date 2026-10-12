@@ -8,8 +8,9 @@ constructor `MOS6502(read_byte, write_byte)`, the flag constants, `CPUState`,
 `python -m sixfiveohtwo` command line. The package ships `py.typed`.
 
 Underscore-prefixed modules and names are implementation details. The CPU's
-register attributes (`a`, `x`, `y`, `s`, `pc`, `p`) and bus attributes
-(`read_byte`, `write_byte`) are public and writable.
+register attributes (`a`, `x`, `y`, `s`, `pc`, `p`), bus attributes
+(`read_byte`, `write_byte`), chip settings (`ane_constant`, `lxa_constant`)
+and the host's DMA input (`dma_stalled`) are public and writable.
 
 ## Compatibility policy
 
