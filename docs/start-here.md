@@ -121,7 +121,7 @@ The core pays for this only when a request changes during a step: it then
 watches for one more bus access, which tells it whether the change came
 before the last cycle.
 
-Three more timing rules come from the same poll:
+Four more timing rules come from the same poll:
 
 - CLI, SEI and PLP change I after the poll, so the next boundary decides on
   the old I: an IRQ waiting behind a CLI is taken one instruction late, and
@@ -129,6 +129,11 @@ Three more timing rules come from the same poll:
   this across a capture and restore.
 - RTI restores P before the poll, so an RTI that clears I lets a waiting IRQ
   in at once.
+- A branch polls at the end of cycle 1, which is its second-to-last cycle
+  when not taken. Taken, it does not poll at the end of cycle 2, so on the
+  same page an interrupt arriving in cycle 2 or 3 waits one more
+  instruction; across a page it polls again at the end of cycle 3. An
+  interrupt seen at either point is taken.
 - An NMI that arrives by the end of cycle 4 of BRK or an IRQ entry (the PCL
   push) takes it over: the frame already pushed stays, the NMI vector is
   used. One later than that waits for the handler's first instruction.

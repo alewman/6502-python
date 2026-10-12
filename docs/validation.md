@@ -148,10 +148,11 @@ Every place the sources disagree, and what the core does.
 - Interrupt polling follows the chip's: the requests at the end of an
   instruction's second-to-last cycle decide (docs/start-here.md). The rule is
   checked by `tests/test_interrupt_polling.py` against the NESdev
-  description, cycle by cycle over fifteen instruction shapes; no oracle here
+  description, cycle by cycle over fifteen instruction shapes and both kinds
+  of taken branch; no oracle here
   can see it, and its board-level judges are blargg's `cpu_interrupts_v2` and
-  AccuracyCoin, run by famicom-python. A taken branch is polled like any
-  other instruction here; the chip polls it earlier.
+  AccuracyCoin, run by famicom-python. Branches keep their own poll points
+  (docs/start-here.md).
 - There is no RDY, SO or bus-halt input, and no 65C02, 65816 or 6510
   variant. The RP2A03 is here only as its 6502 (`RP2A03`): its APU, DMA and
   joypad ports are the host's.
