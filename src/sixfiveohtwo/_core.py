@@ -75,9 +75,10 @@ class CoreMixin:
         # next boundary, unless that step did not poll.
         self._polled: int | None = None
         self._deferred: int | None = None
-        # The requests as a host's note_stall found them, for a branch's poll:
-        # None when no read of the current step has been stalled.
+        # The requests as a host's last two note_stall calls found them, for a
+        # branch's poll: None when the read has not been stalled.
         self._stalled: int | None = None
+        self._stalled_before: int | None = None
         # CLI, SEI and PLP change I after the chip has polled for interrupts,
         # so the next boundary decides on the old I. None: poll P as it is.
         self._polled_i: int | None = None

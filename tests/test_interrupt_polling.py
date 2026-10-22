@@ -365,8 +365,13 @@ class StallingHost(ScriptedHost):
     def read_byte(self, address: int) -> int:
         stall = self.stalls.get(len(self.accesses) + 1)
         if stall is not None:
-            stall(self.cpu)
-            self.cpu.note_stall()
+            # A four-cycle stall (a DMC DMA), the request raised in its second.
+            cpu = self.cpu
+            cpu.note_stall()
+            for halted in range(4):
+                if halted == 1:
+                    stall(cpu)
+                cpu.note_stall()
         return super().read_byte(address)
 
 
@@ -409,3 +414,31 @@ def test_nmi_latched_during_a_stalled_read_is_taken_after_this_instruction(
     assert cpu.pc == after
     assert machine.step() == 7
     assert cpu.pc == NMI_HANDLER
+
+
+def test_a_taken_branch_ignores_a_request_raised_in_the_last_cycle_of_its_next_read_stall() -> None:
+    # AccuracyCoin "Interrupt flag latency" test A (its hardware answer key):
+    # a DMC DMA stalls the taken branch's third cycle and raises the DMC IRQ
+    # in its last cycle; the IRQ waits for the next instruction. perfect6502
+    # agrees for an NMI (in the last halted cycle of that read: not polled).
+    program, setup, cycles, after = STALL_SHAPES["BEQ taken"]
+    machine = ScriptedHost(program)
+    setup(machine)
+    cpu = machine.cpu
+    original = machine.read_byte
+
+    def read_byte(address: int) -> int:
+        if len(machine.accesses) + 1 == 3:  # the next-opcode read
+            cpu.note_stall()
+            for halted in range(4):
+                if halted == 3:
+                    cpu.request_maskable_interrupt()
+                cpu.note_stall()
+        return original(address)
+
+    cpu.read_byte = read_byte
+    assert machine.step() == cycles
+    assert cpu.pc == after
+    assert machine.step() == 2, "the next instruction runs first"
+    assert machine.step() == 7
+    assert cpu.pc == IRQ_HANDLER
