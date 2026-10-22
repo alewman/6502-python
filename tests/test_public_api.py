@@ -13,7 +13,7 @@ import pytest
 import sixfiveohtwo
 from sixfiveohtwo import MOS6502
 
-SUBMODULES = ("console", "cpu", "debug", "disasm", "state", "trace")
+SUBMODULES = ("console", "cpu", "debug", "disasm", "frame", "state", "trace")
 
 
 def test_all_is_exactly_the_public_names_the_package_binds() -> None:

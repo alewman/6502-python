@@ -30,6 +30,7 @@ from sixfiveohtwo.disasm import (
     disassemble_bytes,
     disassemble_range,
 )
+from sixfiveohtwo.frame import CPUFrame
 from sixfiveohtwo.state import CPUState
 from sixfiveohtwo.trace import (
     TRACE_SCHEMA_VERSION,
@@ -62,6 +63,7 @@ __all__ = [
     "Access",
     "BoundaryKind",
     "ByteReader",
+    "CPUFrame",
     "CPUState",
     "CommandDebugger",
     "CommandError",

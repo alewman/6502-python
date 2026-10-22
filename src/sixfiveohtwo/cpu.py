@@ -7,11 +7,8 @@ contract".
 """
 
 from sixfiveohtwo._alu import ALUMixin
-from sixfiveohtwo._control import VECTOR_IRQ, VECTOR_NMI, ControlMixin
+from sixfiveohtwo._control import ControlMixin
 from sixfiveohtwo._core import (
-    IRQ_LINE,
-    NMI_LATCH,
-    NO_POLL,
     STACK,
     B,
     C,
@@ -29,11 +26,10 @@ from sixfiveohtwo._dispatch import Entry, build_table
 from sixfiveohtwo._loads import LoadMixin
 from sixfiveohtwo._shifts import ShiftMixin
 from sixfiveohtwo._undocumented import UndocumentedMixin
+from sixfiveohtwo.frame import CPUFrame
 from sixfiveohtwo.state import CPUState
 
 FLAG_N, FLAG_V, FLAG_U, FLAG_B, FLAG_D, FLAG_I, FLAG_Z, FLAG_C = N, V, U, B, D, I, Z, C
-
-_BUS = ("read_byte", "write_byte")
 
 
 class MOS6502(
@@ -43,6 +39,7 @@ class MOS6502(
     ControlMixin,
     UndocumentedMixin,
     CoreMixin,
+    CPUFrame,
 ):
     """An NMOS 6502 instruction core whose memory is two callables supplied by a host.
 
@@ -65,6 +62,10 @@ class MOS6502(
     interrupt requests at each access of the replacement. A new CPU has
     zeroed registers and I set; :meth:`request_reset` runs the chip's start
     sequence.
+
+    The bus, the interrupt requests, their poll and ``step()``'s skeleton
+    are :class:`~sixfiveohtwo.frame.CPUFrame`'s; this class is the NMOS
+    instruction set and sequences on top of it.
     """
 
     _table: list[Entry]
@@ -78,80 +79,13 @@ class MOS6502(
     lxa_constant = 0xEE
 
     def __init__(self, read_byte: ReadByte, write_byte: WriteByte) -> None:
-        for name, bus in zip(_BUS, (read_byte, write_byte), strict=True):
-            if not callable(bus):
-                hint = ""
-                if callable(getattr(bus, name, None)):
-                    # Until 0.2.0 the CPU took one object with both methods.
-                    hint = "; since 0.2.0 pass the methods: MOS6502(bus.read_byte, bus.write_byte)"
-                raise TypeError(f"{name} must be callable, not {type(bus).__name__}{hint}")
+        super().__init__(read_byte, write_byte)
         self._init_core()
-        self.read_byte = read_byte
-        self.write_byte = write_byte
         cls = type(self)
         if "_table" not in cls.__dict__:
             cls._table = build_table(cls)
 
-    # -- the bus ---------------------------------------------------------
-
-    @property
-    def read_byte(self) -> ReadByte:
-        """The host's ``read_byte(address)``, as passed in or last assigned."""
-        return self._read_byte
-
-    @read_byte.setter
-    def read_byte(self, read_byte: ReadByte) -> None:
-        self._read_byte = read_byte
-        if self._deferred is None:
-            self._read = read_byte
-
-    @property
-    def write_byte(self) -> WriteByte:
-        """The host's ``write_byte(address, value)``, as passed in or last assigned."""
-        return self._write_byte
-
-    @write_byte.setter
-    def write_byte(self, write_byte: WriteByte) -> None:
-        self._write_byte = write_byte
-        if self._deferred is None:
-            self._write = write_byte
-
-    def step(self) -> int:
-        """Execute one instruction, interrupt entry or reset; return its cycle count.
-
-        At an instruction boundary: a pending reset runs the start sequence; a
-        JAMmed CPU stays stopped, reading $FFFF for one cycle; an NMI the last
-        instruction's poll saw is taken; so is an IRQ it saw, if the I flag
-        that poll saw is clear; otherwise one instruction runs.
-
-        The poll sees the requests as they stood at the end of the
-        instruction's second-to-last cycle, so one a bus callback makes
-        during the last cycle waits for the next instruction's poll. One the
-        host makes between steps is taken at the next boundary. BRK,
-        interrupt entries and reset do not poll: one instruction runs after
-        them before anything requested since is taken.
-        """
-        if self._reset_pending:
-            return self._accept_reset()
-        if self.halted:
-            self._read(0xFFFF)
-            return 1
-        polled = self._polled
-        if polled is None:
-            polled = self._requests
-        else:
-            self._polled = None
-        if polled & NMI_LATCH:
-            return self._enter_interrupt(VECTOR_NMI)
-        polled_i = self._polled_i
-        if polled_i is None:
-            if polled & IRQ_LINE and not self.p & I:
-                return self._enter_interrupt(VECTOR_IRQ)
-        else:
-            self._polled_i = None
-            if polled & IRQ_LINE and not polled_i:
-                return self._enter_interrupt(VECTOR_IRQ)
-
+    def _execute(self) -> int:
         pc = self.pc
         opcode = self._read(pc)
         self.pc = (pc + 1) & 0xFFFF
@@ -160,81 +94,16 @@ class MOS6502(
             handler(self)
         else:
             handler(self, mode(self))
-        deferred = self._deferred
-        if deferred is not None:
-            # A bus callback changed a request in the last cycle, after the poll.
-            self._polled = deferred
-            self._deferred = None
         extra = self._extra
         if extra:
             self._extra = 0
             return cycles + extra
         return cycles
 
-    # -- interrupt and reset inputs ------------------------------------
-
-    @property
-    def reset_pending(self) -> bool:
-        """Whether a reset has been requested and not yet run."""
-        return self._reset_pending
-
-    def request_reset(self) -> None:
-        """Run the seven-cycle start sequence at the next boundary.
-
-        The start sequence begins when RESET is released (PM section 9.2), so
-        one request is one reset, whenever the host's board releases the line.
-        Reset has priority over everything, and restarts a JAMmed CPU.
-        """
-        self._reset_pending = True
-
-    def clear_reset(self) -> None:
-        """Cancel a requested reset that has not yet reached a boundary."""
-        self._reset_pending = False
-
-    @property
-    def maskable_interrupt_pending(self) -> bool:
-        """Whether the IRQ line is asserted."""
-        return bool(self._requests & IRQ_LINE)
-
-    def request_maskable_interrupt(self) -> None:
-        """Assert IRQ, a level: it stays asserted until :meth:`clear_maskable_interrupt`.
-
-        Taking the interrupt does not clear it; on a board the device holds
-        IRQ low until its handler acknowledges it, and so must the host. While
-        it is asserted and I is clear, every poll takes the interrupt.
-        """
-        self._request(self._requests | IRQ_LINE)
-        polled = self._polled
-        if polled is not None and not polled & NO_POLL:
-            self._polled = polled | IRQ_LINE
-
-    def clear_maskable_interrupt(self) -> None:
-        """Release IRQ."""
-        self._request(self._requests & ~IRQ_LINE)
-        if self._polled is not None:
-            self._polled &= ~IRQ_LINE
-
-    @property
-    def non_maskable_interrupt_pending(self) -> bool:
-        """Whether an NMI edge has been latched and not yet taken."""
-        return bool(self._requests & NMI_LATCH)
-
-    def request_non_maskable_interrupt(self) -> None:
-        """Latch an NMI edge; the next poll takes it, whatever I says.
-
-        NMI is edge-triggered: call this on the line's falling edge. Requests
-        made while one is pending coalesce into one NMI.
-        """
-        self._request(self._requests | NMI_LATCH)
-        polled = self._polled
-        if polled is not None and not polled & NO_POLL:
-            self._polled = polled | NMI_LATCH
-
-    def clear_non_maskable_interrupt(self) -> None:
-        """Cancel a latched NMI that has not yet been taken, even one already polled."""
-        self._request(self._requests & ~NMI_LATCH)
-        if self._polled is not None:
-            self._polled &= ~NMI_LATCH
+    def _halted(self) -> int:
+        # JAM has stopped the processor: it reads $FFFF every cycle until reset.
+        self._read(0xFFFF)
+        return 1
 
     # -- state -----------------------------------------------------------
 
@@ -244,8 +113,6 @@ class MOS6502(
         No host reads, no side effects. Memory and devices are the host's and
         are not included (docs/cpu-state.md).
         """
-        polled_i = self._polled_i
-        polled = self._requests if self._polled is None else self._polled
         return CPUState(
             a=self.a,
             x=self.x,
@@ -253,14 +120,7 @@ class MOS6502(
             s=self.s,
             pc=self.pc,
             p=self.p,
-            halted=self.halted,
-            reset_pending=self._reset_pending,
-            maskable_interrupt_pending=bool(self._requests & IRQ_LINE),
-            non_maskable_interrupt_pending=bool(self._requests & NMI_LATCH),
-            polled_i=None if polled_i is None else bool(polled_i),
-            polled_maskable_interrupt=_differs(polled, self._requests, IRQ_LINE),
-            polled_non_maskable_interrupt=_differs(polled, self._requests, NMI_LATCH),
-            skipped_poll=bool(polled & NO_POLL),
+            **self._poll_fields(),
         )
 
     def restore_state(self, state: CPUState) -> None:
@@ -278,30 +138,8 @@ class MOS6502(
             state.pc,
             state.p,
         )
-        self.halted = state.halted
-        self._reset_pending = state.reset_pending
-        self._requests = (IRQ_LINE if state.maskable_interrupt_pending else 0) | (
-            NMI_LATCH if state.non_maskable_interrupt_pending else 0
-        )
-        polled = self._requests
-        for bit, seen in (
-            (IRQ_LINE, state.polled_maskable_interrupt),
-            (NMI_LATCH, state.polled_non_maskable_interrupt),
-        ):
-            if seen is not None:
-                polled = polled | bit if seen else polled & ~bit
-        if state.skipped_poll:
-            polled |= NO_POLL
-        self._polled = None if polled == self._requests else polled
-        self._confirm()
-        self._polled_i = None if state.polled_i is None else (I if state.polled_i else 0)
+        self._restore_poll(state)
         self._extra = 0
-
-
-def _differs(polled: int, requests: int, bit: int) -> bool | None:
-    """What the poll saw of ``bit`` when that is not what the host has requested, else None."""
-    seen = bool(polled & bit)
-    return None if seen == bool(requests & bit) else seen
 
 
 class RP2A03(MOS6502):
