@@ -84,9 +84,11 @@ family's reference core, and made correct to the bus cycle.
   it on the next. famicom-python found the need: AccuracyCoin's unofficial
   opcode tests (error code 7) check it against hardware.
 - **`note_stall()`: interrupts raised during a stalled read are polled.** A
-  host whose read callback ran a DMA calls it before the access: a request
-  raised during the stall counts as raised before the read, whichever cycle
-  was stalled, the last one and a taken branch's included. perfect6502 with
+  host whose read callback runs a DMA calls it as the stall begins and after
+  each halted cycle: a request raised during the stall counts as raised before
+  the read, whichever cycle was stalled, the last one and a taken branch's
+  included, except that a taken branch's next-opcode read ignores one raised
+  in the stall's last cycle (AccuracyCoin "Interrupt flag latency" test A). perfect6502 with
   RDY held low shows it (an NMI falling during a 4-cycle halt of a JMP's last
   cycle, or of a taken branch's operand or next-opcode read, is taken at the
   next boundary). famicom-python found it in lockstep with Mesen2: Kirby's
