@@ -156,7 +156,10 @@ Every place the sources disagree, and what the core does.
   AccuracyCoin, run by famicom-python. Branches keep their own poll points
   (docs/start-here.md).
 - There is no RDY, SO or bus-halt input (a host stretches a read inside its
-  callback, and reports it through `dma_stalled` for the unstable stores), and
+  callback, and reports it through `dma_stalled` for the unstable stores and
+  `note_stall()` for interrupt polling; perfect6502 is the judge of the
+  latter, run by famicom-python's `scripts/perfect6502_nmi_branch.c` family),
+  and
   no 65C02, 65816 or 6510
   variant. The RP2A03 is here only as its 6502 (`RP2A03`): its APU, DMA and
   joypad ports are the host's.
