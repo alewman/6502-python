@@ -50,6 +50,15 @@ def read_byte(address: int) -> int:
     return ram[address & 0x07FF]
 ```
 
+### Another part on the same frame
+
+`MOS6502` is two layers: `sixfiveohtwo.frame.CPUFrame` (the bus callables,
+the interrupt requests and the poll described under "Reset and interrupts",
+and `step()`'s skeleton) and the NMOS instruction set on top. A core for
+another member of the family subclasses `CPUFrame` directly and brings its own
+instructions, inheriting none of the NMOS ones; docs/api-stability.md lists
+what it may rely on.
+
 ## Every cycle is a bus access
 
 The 6502 has no idle cycles: in every one it either reads or writes, and

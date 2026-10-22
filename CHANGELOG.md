@@ -64,6 +64,16 @@ family's reference core, and made correct to the bus cycle.
 
 ### Added
 
+- **`CPUFrame`, the frame other 65xx-family cores subclass.** The bus
+  callables, the interrupt requests and their poll, `step()`'s skeleton and
+  the state's poll fields move out of `MOS6502` into
+  `sixfiveohtwo.frame.CPUFrame`, with hooks for reset, a halted CPU, an
+  interrupt entry and one instruction; `MOS6502` is the frame plus the NMOS
+  instruction set. Its subclassing surface is semver-covered
+  (docs/api-stability.md) and held by `tests/test_frame.py`, a toy CPU with no
+  NMOS code. NMOS behaviour is unchanged: SingleStepTests `6502` and
+  `nes6502` (2,560,000 cases each) and Dormann pass as before. First user:
+  `65816-python`.
 - **`RP2A03`, the NES and Famicom CPU**: `MOS6502` with the decimal adjust
   disconnected, as on the die (the Breaks wiki). D is still a flag; ADC, SBC,
   USBC, RRA, ISC and ARR compute in binary whatever it says. Certified

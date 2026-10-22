@@ -41,7 +41,12 @@ WriteByte = Callable[[int, int], None]
 
 
 class CoreMixin:
-    """Private implementation of CPU state and the helpers every handler uses."""
+    """Private implementation of the NMOS registers and the helpers every handler uses.
+
+    The bus, the interrupt requests and their poll are the frame's
+    (:mod:`sixfiveohtwo.frame`); ``self._read`` and ``self._write`` below are
+    its.
+    """
 
     #: The D bit as the adder sees it: D where the decimal adjust is wired up,
     #: 0 on a part that has it disconnected (``RP2A03``). ADC, SBC, USBC, RRA,
@@ -60,59 +65,9 @@ class CoreMixin:
         # Bit 5 is kept set and bit 4 (B) clear: neither is a flip-flop, and
         # this is the value P reads as everywhere except on the stack.
         self.p = U | I
-        # Interrupt inputs (docs/start-here.md, "Reset and interrupts").
-        self._reset_pending = False
-        self._requests = 0  # IRQ_LINE | NMI_LATCH, as the host has set them
-        # The chip polls its interrupt detectors in an instruction's last
-        # cycle, so what counts is the requests as they stood at the end of
-        # the second-to-last cycle (NESdev, "CPU interrupts", "Detailed
-        # interrupt behavior"). Usually that is the requests as they stand,
-        # and _polled is None. It holds what the poll saw instead, for the
-        # next boundary only, when that differs: a bus callback changed a
-        # request in the last cycle, too late (_deferred, see _request), or
-        # the step was BRK, an interrupt entry or reset, which do not poll
-        # (NO_POLL). A request the host makes between steps is taken at the
-        # next boundary, unless that step did not poll.
-        self._polled: int | None = None
-        self._deferred: int | None = None
-        # CLI, SEI and PLP change I after the chip has polled for interrupts,
-        # so the next boundary decides on the old I. None: poll P as it is.
-        self._polled_i: int | None = None
-        # JAM has stopped the processor; only a reset restarts it.
-        self.halted = False
         # Cycles a step adds to its opcode's base count: a page crossed by an
         # indexed read, a branch taken.
         self._extra = 0
-
-    # -- interrupt requests ------------------------------------------------
-
-    def _request(self, requests: int) -> None:
-        """Change the requests, and arrange to learn whether a bus access follows.
-
-        The first change since the last access keeps the requests from
-        before it in _deferred and routes the next access through
-        _confirm. If that access comes in the same step, the change was
-        before the last cycle and the poll sees it; if the step ends first,
-        the poll saw _deferred. Accesses cost nothing extra otherwise.
-        """
-        if self._deferred is None:
-            self._deferred = self._requests
-            self._read = self._read_confirming
-            self._write = self._write_confirming
-        self._requests = requests
-
-    def _confirm(self) -> None:
-        self._deferred = None
-        self._read = self._read_byte
-        self._write = self._write_byte
-
-    def _read_confirming(self, address: int) -> int:
-        self._confirm()
-        return self._read_byte(address)
-
-    def _write_confirming(self, address: int, value: int) -> None:
-        self._confirm()
-        self._write_byte(address, value)
 
     # -- fetch -------------------------------------------------------------
 
