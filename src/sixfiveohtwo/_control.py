@@ -31,11 +31,21 @@ class ControlMixin:
         # of one that crosses a page; seen at either point, it is taken. Not
         # taken, cycle 1 is the second-to-last and the usual rule holds.
         early = self._requests  # as they stand at the end of cycle 1
+        self._stalled = None
         offset = self._fetch()
+        if self._stalled is not None:
+            # RDY held the operand fetch: requests raised during the stall
+            # are polled at its end (note_stall).
+            early = self._stalled
+            self._stalled = None
         if not taken:
             return
         pc = self.pc
         self._read(pc)
+        if self._stalled is not None:
+            # A stall of the next-opcode read counts too (perfect6502).
+            early |= self._stalled
+            self._stalled = None
         target = (pc + offset - ((offset & 0x80) << 1)) & 0xFFFF
         if (target ^ pc) & 0xFF00:
             self._read((pc & 0xFF00) | (target & 0xFF))

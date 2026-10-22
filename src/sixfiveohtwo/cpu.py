@@ -244,6 +244,20 @@ class MOS6502(
         if self._polled is not None:
             self._polled &= ~NMI_LATCH
 
+    def note_stall(self) -> None:
+        """Say, from inside a read callback, that RDY held this read cycle (a DMA) until now.
+
+        The halted chip repeats the cycle and its interrupt detectors keep
+        sampling, so a request raised during the stall counts as raised
+        before the read: it is polled at the end of the cycle it stretched,
+        whichever cycle that is, even the last or a taken branch's (perfect6502
+        with RDY held low; docs/start-here.md). Call it after the stall's
+        cycles, before the access the read callback returns.
+        """
+        self._stalled = self._requests
+        if self._deferred is not None:
+            self._confirm()
+
     # -- state -----------------------------------------------------------
 
     def capture_state(self) -> CPUState:
