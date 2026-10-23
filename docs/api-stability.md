@@ -40,6 +40,33 @@ code, so a change to this surface fails here before it breaks a dependent
 core. `MOS6502`'s own underscore names (its handlers, `_ea_*`, `_extra`,
 `_table`) stay implementation details.
 
+## The tooling: a subclassing surface
+
+`65816-python` reuses the debugger, the trace functions and the console by
+subclassing them, as it subclasses the frame. These hooks are public and
+semver-covered:
+
+- `StepRecord`'s class attributes `state_type`, `kind_type`,
+  `instruction_kind`, `halted_kinds`, `instruction_type`, `access_kinds`,
+  `address_mask`, and its static method `decode(data, address)`; a subclass
+  is a `@dataclass(frozen=True, slots=True)` that sets them and adds no
+  fields. An access kind starts with `"r"` or `"w"` for a read or write, or
+  with a letter of the part's own for a cycle that is neither; watchpoints
+  match the first letter.
+- `DebugSession.record_type` and the methods `boundary(state)`,
+  `program_address(state)`, `decode(state)`, `_wrap_bus()` and
+  `_unwrap_bus(originals)` (the second gets back the tuple the first stored
+  in `_originals`; `_accesses` is the list the wrappers append to).
+- `read_trace(stream, record_type=)` and `step_record_from_dict(value,
+  record_type=)`; the writers and comparisons read the record's own type.
+- `CommandDebugger`'s class attributes `prompt`, `registers`, `help_lines`,
+  `call_mnemonics`, and the methods `format_state`, `format_address`,
+  `format_instruction`, `format_record`, `format_run`, `disassemble_at` and
+  `set_register`.
+
+`tests/test_tooling_hooks.py` holds them with a toy CPU that has 24-bit
+addresses, its own state and boundary kinds, and IO cycles.
+
 ## Compatibility policy
 
 - Patch releases fix defects without intentional public incompatibilities.

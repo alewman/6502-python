@@ -74,6 +74,16 @@ family's reference core, and made correct to the bus cycle.
   NMOS code. NMOS behaviour is unchanged: SingleStepTests `6502` and
   `nes6502` (2,560,000 cases each) and Dormann pass as before. First user:
   `65816-python`.
+- **The tooling is a subclassing surface too.** `StepRecord`,
+  `DebugSession`, the trace functions and `CommandDebugger` take hooks, as
+  class attributes and overridable methods, for a part's state type,
+  boundary kinds, instruction type and decoder, address width, extra bus
+  callables (IO cycles) and register text; `read_trace` and
+  `step_record_from_dict` take a `record_type`. The defaults are the 6502's:
+  its records, traces (schema version 1) and console output are unchanged.
+  Semver-covered (docs/api-stability.md) and held by
+  `tests/test_tooling_hooks.py`, a toy CPU with 24-bit addresses, its own
+  state and kinds, and IO cycles. First user: `65816-python`.
 - **`RP2A03`, the NES and Famicom CPU**: `MOS6502` with the decimal adjust
   disconnected, as on the die (the Breaks wiki). D is still a flag; ADC, SBC,
   USBC, RRA, ISC and ARR compute in binary whatever it says. Certified
