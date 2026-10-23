@@ -66,7 +66,7 @@ family's reference core, and made correct to the bus cycle.
 
 - **`CPUFrame`, the frame other 65xx-family cores subclass.** The bus
   callables, the interrupt requests and their poll, `step()`'s skeleton and
-  the state's poll fields move out of `MOS6502` into
+  the state's poll fields and `note_stall()` move out of `MOS6502` into
   `sixfiveohtwo.frame.CPUFrame`, with hooks for reset, a halted CPU, an
   interrupt entry and one instruction; `MOS6502` is the frame plus the NMOS
   instruction set. Its subclassing surface is semver-covered
@@ -87,6 +87,22 @@ family's reference core, and made correct to the bus cycle.
   SingleStepTests' value. famicom-python found the need: blargg's
   `instr_test-v5` `03-immediate`, whose CRCs were taken on an NES, passes only
   with LXA's constant at $FF.
+- **`dma_stalled`, the host's word that a DMA stretched a read.** SHA, SHX,
+  SHY and TAS then store their value without the AND (H + 1), the
+  page-crossed address keeping it (NMS p. 48). The core has no RDY input; a
+  board running DMA inside its read callback sets it on that read and clears
+  it on the next. famicom-python found the need: AccuracyCoin's unofficial
+  opcode tests (error code 7) check it against hardware.
+- **`note_stall()`: interrupts raised during a stalled read are polled.** A
+  host whose read callback runs a DMA calls it as the stall begins and after
+  each halted cycle: a request raised during the stall counts as raised before
+  the read, whichever cycle was stalled, the last one and a taken branch's
+  included, except that a taken branch's next-opcode read ignores one raised
+  in the stall's last cycle (AccuracyCoin "Interrupt flag latency" test A). perfect6502 with
+  RDY held low shows it (an NMI falling during a 4-cycle halt of a JMP's last
+  cycle, or of a taken branch's operand or next-opcode read, is taken at the
+  next boundary). famicom-python found it in lockstep with Mesen2: Kirby's
+  Adventure, VBL's NMI during a DMC DMA inside a `BEQ`.
 - **Interrupts polled at the end of the second-to-last cycle, as the chip
   does**: a request a bus callback makes in an instruction's last cycle waits
   for the next instruction's poll; an IRQ the poll saw is taken though

@@ -27,6 +27,9 @@ The subclassing surface, covered by docs/api-stability.md:
 - keep the interrupt-disable flag in bit 2 of ``self.p`` (both parts do);
 - an extra request (an ABORT input) is a further bit of ``_requests`` set
   through ``_request``, taken by overriding ``_boundary_interrupt``;
+- a read a host stretches with RDY low (``note_stall``) leaves the requests
+  it found in ``_stalled`` and ``_stalled_before``, for a branch sequence
+  that polls them, which resets both to None;
 - a state snapshot includes :meth:`_poll_fields` and is restored with
   :meth:`_restore_poll`.
 """
@@ -76,6 +79,10 @@ class CPUFrame:
         # next boundary, unless that step did not poll.
         self._polled: int | None = None
         self._deferred: int | None = None
+        # The requests as a host's last two note_stall calls found them, for a
+        # branch's poll: None when the read has not been stalled.
+        self._stalled: int | None = None
+        self._stalled_before: int | None = None
         # CLI, SEI and PLP change I after the chip has polled for interrupts,
         # so the next boundary decides on the old I. None: poll P as it is.
         self._polled_i: int | None = None
@@ -136,6 +143,27 @@ class CPUFrame:
     def _write_confirming(self, address: int, value: int) -> None:
         self._confirm()
         self._write_byte(address, value)
+
+    def note_stall(self) -> None:
+        """Say, from inside a read callback, that RDY is holding this read (a DMA).
+
+        Call it as the stall begins and again after each halted cycle, then
+        make the access. The halted chip repeats the cycle and its interrupt
+        detectors keep sampling, so a request raised during the stall is
+        polled at the end of the read it stretched, whichever cycle that is,
+        even the last (perfect6502 with RDY held low; docs/start-here.md). A
+        taken branch's next-opcode read, which does not poll, takes requests
+        raised by the start of the stall's last halted cycle, not during it
+        (perfect6502; AccuracyCoin "Interrupt flag latency" test A).
+
+        The frame only records what the requests were at each call, in
+        ``_stalled`` and ``_stalled_before``; a part's branch sequence reads
+        them (the NMOS one does) and resets both to None.
+        """
+        self._stalled_before = self._stalled
+        self._stalled = self._requests
+        if self._deferred is not None:
+            self._confirm()
 
     # -- the step --------------------------------------------------------
 
