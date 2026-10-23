@@ -15,6 +15,7 @@ functions read and compare another 65xx-family core's traces: pass its
 import json
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, fields, replace
+from functools import cache
 from itertools import zip_longest
 from typing import TextIO
 
@@ -266,6 +267,7 @@ def _append(
         differences.append(TraceDifference(path, left, right))
 
 
+@cache
 def _state_fields(state_type: type) -> tuple[str, ...]:
     return tuple(field.name for field in fields(state_type))
 
