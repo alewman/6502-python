@@ -80,3 +80,14 @@ a line loop with no terminal dependencies. Commands: `registers`, `step`,
 `history`, `set` (A X Y S P PC), `irq on|off`, `nmi`, `reset`, `quit`, with
 z80-python's one-letter aliases. Numbers are decimal unless written `0x1234`
 or `$1234`.
+
+## Other parts
+
+The session, its records, the trace functions and the command frontend are
+written for the 6502 by default and for any 65xx-family core by subclassing:
+a `StepRecord` subclass names the part's state type, boundary kinds,
+instruction type, access kinds and address width; a `DebugSession` subclass
+says which boundary comes next, where breakpoints match, how to disassemble
+and which extra bus callables to track; a `CommandDebugger` subclass prints
+its registers. `65816-python` does this for 24-bit addresses and IO cycles.
+The hooks are listed in [api-stability.md](api-stability.md).
