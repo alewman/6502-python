@@ -237,8 +237,9 @@ class ControlMixin:
         low = self._pull()
         self.pc = (self._pull() << 8) | low
 
-    def _enter_interrupt(self, vector: int) -> int:
+    def _enter_interrupt(self, kind: int) -> int:
         """Take IRQ or NMI at an instruction boundary: seven cycles, B clear."""
+        vector = VECTOR_NMI if kind == NMI_LATCH else VECTOR_IRQ
         # The opcode at PC is fetched and discarded, then read again: PC is not
         # advanced (NESdev, "CPU interrupts"; NMS p. 83 lists PC + 1 for the
         # second read -- see docs/validation.md, "Divergences").
