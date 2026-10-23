@@ -180,3 +180,17 @@ def test_poll_fields_round_trip_through_a_foreign_state_class() -> None:
     assert other.entered == []
     other.step()
     assert other.entered == ["irq"]
+
+
+def test_note_stall_records_the_requests_at_each_call_for_a_part_to_poll() -> None:
+    cpu = toy(bytes([0, 0]))
+    assert cpu._stalled is None and cpu._stalled_before is None
+    cpu.note_stall()  # the stall begins: nothing requested yet
+    cpu.request_non_maskable_interrupt()  # raised during the first halted cycle
+    cpu.note_stall()
+    assert cpu._stalled_before == 0 and cpu._stalled == NMI_LATCH
+    assert cpu._deferred is None  # the stalled read is a bus access: confirmed
+    cpu._stalled = cpu._stalled_before = None  # as the part's branch sequence does
+    cpu.step()
+    cpu.step()
+    assert cpu.entered == ["nmi"]

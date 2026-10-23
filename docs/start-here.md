@@ -143,6 +143,15 @@ Four more timing rules come from the same poll:
   same page an interrupt arriving in cycle 2 or 3 waits one more
   instruction; across a page it polls again at the end of cycle 3. An
   interrupt seen at either point is taken.
+- A read that RDY stretches (a DMA) is repeated while the chip is halted, and
+  its interrupt detectors keep sampling: a request raised during the stall is
+  polled at the end of the read it stretched, even the last cycle's or a taken
+  branch's (perfect6502, RDY held low for four cycles). One exception: a
+  taken branch's next-opcode read takes the requests raised by the start of
+  the stall's last halted cycle, not during it (perfect6502; AccuracyCoin
+  "Interrupt flag latency" test A, a DMC IRQ raised by that DMA's last cycle).
+  The core has no RDY; a host that stalls a read inside its callback calls
+  `note_stall()` as the stall begins and after each halted cycle.
 - An NMI that arrives by the end of cycle 4 of BRK or an IRQ entry (the PCL
   push) takes it over: the frame already pushed stays, the NMI vector is
   used. One later than that waits for the handler's first instruction.

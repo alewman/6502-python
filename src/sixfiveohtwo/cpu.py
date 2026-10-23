@@ -78,6 +78,14 @@ class MOS6502(
     ane_constant = 0xEE
     lxa_constant = 0xEE
 
+    #: Set by a host whose bus callback stretched the current read cycle with
+    #: RDY low (a DMA), cleared by it on the next read that is not. SHA, SHX,
+    #: SHY and TAS look at it on their write: after a stretched cycle N the
+    #: value is stored without its AND (H + 1), so SHY becomes a true STY; the
+    #: page-crossing address is unchanged (NMS p. 48, table). The core has no
+    #: RDY input, so it never sets this itself (docs/undocumented-behavior.md).
+    dma_stalled = False
+
     def __init__(self, read_byte: ReadByte, write_byte: WriteByte) -> None:
         super().__init__(read_byte, write_byte)
         self._init_core()
