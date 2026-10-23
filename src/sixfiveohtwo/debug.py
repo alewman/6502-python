@@ -4,16 +4,21 @@
 ``capture_state()`` -- one boundary at a time, with execute breakpoints,
 bounded runs, a history ring and, optionally, bus-access tracking and
 watchpoints. It never changes what the core does. See docs/debug-session.md.
+
+The defaults describe the NMOS 6502. A core for another 65xx-family part
+subclasses :class:`StepRecord` and :class:`DebugSession` and overrides their
+documented hooks (its state type, boundary kinds, address width,
+disassembler and bus) to reuse the rest; docs/api-stability.md lists them.
 """
 
 from collections import deque
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, is_dataclass
 from enum import Enum
-from typing import Protocol, runtime_checkable
+from typing import Any, ClassVar, Protocol, runtime_checkable
 
 from sixfiveohtwo._core import I
-from sixfiveohtwo.disasm import ByteReader, Instruction, disassemble
+from sixfiveohtwo.disasm import ByteReader, Instruction, disassemble, disassemble_bytes
 from sixfiveohtwo.state import CPUState
 
 
@@ -48,15 +53,32 @@ class StopReason(Enum):
     CYCLE_LIMIT = "cycle_limit"
 
 
-#: One bus access, ``("r" | "w", address, value)``, in the order the step made
-#: them: exactly one per cycle.
+#: One bus access, ``(kind, address, value)``, in the order the step made
+#: them: exactly one per cycle. On the 6502 the kind is ``"r"`` or ``"w"``; a
+#: subclass's kinds start with ``"r"`` or ``"w"`` too, or with a letter of its
+#: own for a cycle that is neither (watchpoints match the first letter).
 Access = tuple[str, int, int]
-_ACCESS_KINDS = frozenset(("r", "w"))
 
 
 @dataclass(frozen=True, slots=True)
 class StepRecord:
-    """Immutable before/after evidence for one processor boundary."""
+    """Immutable before/after evidence for one processor boundary.
+
+    The class attributes are the hooks a subclass for another part sets: the
+    types its fields must have, the access kinds and the address width, and
+    :meth:`decode`, which a trace reader uses to rebuild an instruction.
+    """
+
+    #: The CPU state type ``before`` and ``after`` hold.
+    state_type: ClassVar[type] = CPUState
+    #: The enum ``kind`` is a member of, and its member for an instruction.
+    kind_type: ClassVar[type[Enum]] = BoundaryKind
+    instruction_kind: ClassVar[Enum] = BoundaryKind.INSTRUCTION
+    #: The kinds that mean a stopped CPU, for ``DebugSession.run(stop_on_halt=True)``.
+    halted_kinds: ClassVar[frozenset[Enum]] = frozenset((BoundaryKind.JAM_IDLE,))
+    instruction_type: ClassVar[type] = Instruction
+    access_kinds: ClassVar[frozenset[str]] = frozenset(("r", "w"))
+    address_mask: ClassVar[int] = 0xFFFF
 
     sequence: int
     kind: BoundaryKind
@@ -68,37 +90,52 @@ class StepRecord:
     #: accesses; ``None`` when it does not.
     accesses: tuple[Access, ...] | None = None
 
+    @staticmethod
+    def decode(data: bytes, address: int) -> Instruction:
+        """The instruction ``data`` encodes at ``address`` (a trace reader's decoder)."""
+        return disassemble_bytes(data, address)
+
     def __post_init__(self) -> None:
+        cls = type(self)
         if type(self.sequence) is not int or self.sequence < 0:
             raise ValueError("sequence must be a non-negative integer")
-        if type(self.kind) is not BoundaryKind:
-            raise ValueError("kind must be a BoundaryKind")
-        if type(self.before) is not CPUState or type(self.after) is not CPUState:
-            raise ValueError("before and after must be CPUState values")
+        if type(self.kind) is not cls.kind_type:
+            raise ValueError(f"kind must be a {cls.kind_type.__name__}")
+        state = cls.state_type
+        if type(self.before) is not state or type(self.after) is not state:
+            raise ValueError(f"before and after must be {state.__name__} values")
         if type(self.cycles) is not int or self.cycles <= 0:
             raise ValueError("cycles must be a positive integer")
-        if self.instruction is not None and type(self.instruction) is not Instruction:
-            raise ValueError("instruction must be an Instruction or None")
-        if self.kind is not BoundaryKind.INSTRUCTION and self.instruction is not None:
+        if self.instruction is not None and type(self.instruction) is not cls.instruction_type:
+            raise ValueError(f"instruction must be an {cls.instruction_type.__name__} or None")
+        if self.kind is not cls.instruction_kind and self.instruction is not None:
             raise ValueError("lifecycle boundaries cannot contain an instruction")
         if self.accesses is not None and (
             type(self.accesses) is not tuple
-            or not all(_valid_access(access) for access in self.accesses)
+            or not all(cls.valid_access(access) for access in self.accesses)
         ):
             raise ValueError("accesses must be a tuple of (kind, address, value) or None")
 
+    @classmethod
+    def valid_access(cls, access: object) -> bool:
+        """Whether ``access`` is a ``(kind, address, value)`` this record type allows."""
+        if type(access) is not tuple or len(access) != 3:
+            return False
+        kind, address, value = access
+        return (
+            kind in cls.access_kinds
+            and type(address) is int
+            and 0 <= address <= cls.address_mask
+            and type(value) is int
+            and 0 <= value <= 0xFF
+        )
 
-def _valid_access(access: object) -> bool:
+
+def _valid_hit(access: object) -> bool:
     if type(access) is not tuple or len(access) != 3:
         return False
     kind, address, value = access
-    return (
-        kind in _ACCESS_KINDS
-        and type(address) is int
-        and 0 <= address <= 0xFFFF
-        and type(value) is int
-        and 0 <= value <= 0xFF
-    )
+    return type(kind) is str and type(address) is int and type(value) is int
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,7 +146,7 @@ class RunResult:
     steps: int
     instructions: int
     cycles: int
-    state: CPUState
+    state: Any  # the session's state type: CPUState on the 6502
     last_record: StepRecord | None
     #: For WATCHPOINT: the watched accesses that stopped the run.
     hits: tuple[Access, ...] = ()
@@ -123,11 +160,11 @@ class RunResult:
                 raise ValueError(f"{name} must be a non-negative integer")
         if self.instructions > self.steps:
             raise ValueError("instructions cannot exceed steps")
-        if type(self.state) is not CPUState:
-            raise ValueError("state must be a CPUState")
-        if self.last_record is not None and type(self.last_record) is not StepRecord:
+        if not is_dataclass(self.state) or isinstance(self.state, type):
+            raise ValueError("state must be a CPU state value")
+        if self.last_record is not None and not isinstance(self.last_record, StepRecord):
             raise ValueError("last_record must be a StepRecord or None")
-        if type(self.hits) is not tuple or not all(_valid_access(hit) for hit in self.hits):
+        if type(self.hits) is not tuple or not all(_valid_hit(hit) for hit in self.hits):
             raise ValueError("hits must be a tuple of (kind, address, value) accesses")
 
 
@@ -163,7 +200,15 @@ class DebugSession:
     the originals back. The target may be a whole board rather than a bare
     CPU: an object whose ``step()`` runs its devices around one CPU step and
     whose ``cpu`` attribute is the processor, whose bus is then the one tracked.
+
+    A subclass for another part sets :attr:`record_type` and overrides
+    :meth:`boundary`, :meth:`program_address`, :meth:`decode` and, if its bus
+    has more callables, :meth:`_wrap_bus`.
     """
+
+    #: The StepRecord subclass this session makes; its hooks give the state
+    #: type, kinds and address width.
+    record_type: ClassVar[type[StepRecord]] = StepRecord
 
     def __init__(
         self,
@@ -200,13 +245,26 @@ class DebugSession:
         if track_accesses:
             self._wrap_bus()
 
-    @property
-    def tracking(self) -> bool:
-        """Whether this session is recording bus accesses."""
+    # -- hooks a subclass for another part overrides ----------------------
 
-        return self._originals is not None
+    def boundary(self, state: Any) -> Enum:
+        """What the next ``step()`` will do from ``state`` (:func:`next_boundary`)."""
+        return next_boundary(state)
+
+    def program_address(self, state: Any) -> int:
+        """The address breakpoints match: the instruction's, before it runs."""
+        return state.pc
+
+    def decode(self, state: Any) -> Instruction:
+        """The instruction about to run from ``state``, read with ``peek_byte``."""
+        return disassemble(self.peek_byte, state.pc)
 
     def _wrap_bus(self) -> None:
+        """Install tracking wrappers on the CPU's bus and keep the originals.
+
+        Sets ``self._accesses`` (the list each access is appended to) and
+        ``self._originals``; :meth:`_unwrap_bus` puts the originals back.
+        """
         cpu = self.cpu
         originals = (cpu.read_byte, cpu.write_byte)
         read_byte, write_byte = originals
@@ -226,12 +284,24 @@ class DebugSession:
         cpu.read_byte = tracked_read_byte
         cpu.write_byte = tracked_write_byte
 
+    def _unwrap_bus(self, originals: tuple) -> None:
+        """Give the CPU the bus callables :meth:`_wrap_bus` kept."""
+        cpu = self.cpu
+        cpu.read_byte, cpu.write_byte = originals
+
+    # -- the session ------------------------------------------------------
+
+    @property
+    def tracking(self) -> bool:
+        """Whether this session is recording bus accesses."""
+
+        return self._originals is not None
+
     def close(self) -> None:
         """Stop tracking accesses and give the CPU its own bus callables back."""
 
         if self._originals is not None:
-            cpu = self.cpu
-            cpu.read_byte, cpu.write_byte = self._originals
+            self._unwrap_bus(self._originals)
             self._originals = None
             self._accesses = None
 
@@ -247,7 +317,7 @@ class DebugSession:
         self._history.clear()
 
     def add_breakpoint(self, address: int) -> None:
-        """Stop before executing the instruction at a 16-bit address."""
+        """Stop before executing the instruction at an address."""
 
         self.breakpoints.add(self._validate_address(address))
 
@@ -275,10 +345,11 @@ class DebugSession:
         """Advance exactly one boundary, ignoring execute breakpoints."""
 
         before = self.target.capture_state()
-        kind = next_boundary(before)
+        kind = self.boundary(before)
+        instruction_kind = self.record_type.instruction_kind
         instruction = None
-        if kind is BoundaryKind.INSTRUCTION and self.peek_byte is not None:
-            instruction = disassemble(self.peek_byte, before.pc)
+        if kind is instruction_kind and self.peek_byte is not None:
+            instruction = self.decode(before)
 
         if self._accesses is not None:
             self._accesses.clear()
@@ -286,7 +357,7 @@ class DebugSession:
         if type(cycles) is not int or cycles <= 0:
             raise ValueError("target step() must return a positive integer cycle count")
         after = self.target.capture_state()
-        record = StepRecord(
+        record = self.record_type(
             sequence=self.total_steps,
             kind=kind,
             before=before,
@@ -297,7 +368,7 @@ class DebugSession:
         )
         self.total_steps += 1
         self.total_cycles += cycles
-        if kind is BoundaryKind.INSTRUCTION:
+        if kind is instruction_kind:
             self.total_instructions += 1
         if self.history_limit:
             self._history.append(record)
@@ -324,14 +395,16 @@ class DebugSession:
         if type(stop_on_halt) is not bool:
             raise ValueError("stop_on_halt must be a bool")
 
+        instruction_kind = self.record_type.instruction_kind
+        halted_kinds = self.record_type.halted_kinds
         steps = 0
         instructions = 0
         cycles = 0
         last_record = None
         while steps < max_steps:
             state = self.target.capture_state()
-            kind = next_boundary(state)
-            if kind is BoundaryKind.INSTRUCTION and state.pc in self.breakpoints:
+            kind = self.boundary(state)
+            if kind is instruction_kind and self.program_address(state) in self.breakpoints:
                 return RunResult(
                     StopReason.BREAKPOINT,
                     steps,
@@ -340,7 +413,7 @@ class DebugSession:
                     state,
                     last_record,
                 )
-            if stop_on_halt and kind is BoundaryKind.JAM_IDLE:
+            if stop_on_halt and kind in halted_kinds:
                 return RunResult(
                     StopReason.HALTED,
                     steps,
@@ -353,7 +426,7 @@ class DebugSession:
             last_record = self.step()
             steps += 1
             cycles += last_record.cycles
-            if last_record.kind is BoundaryKind.INSTRUCTION:
+            if last_record.kind is instruction_kind:
                 instructions += 1
             hits = self._watch_hits(last_record)
             if hits:
@@ -397,13 +470,14 @@ class DebugSession:
         return tuple(
             access
             for access in record.accesses
-            if access[1] in self.watchpoints and access[0] in self.watchpoints[access[1]]
+            if access[1] in self.watchpoints and access[0][0] in self.watchpoints[access[1]]
         )
 
-    @staticmethod
-    def _validate_address(address: int) -> int:
-        if type(address) is not int or not 0 <= address <= 0xFFFF:
-            raise ValueError("address must be an integer in range 0x0000..0xFFFF")
+    def _validate_address(self, address: int) -> int:
+        mask = self.record_type.address_mask
+        if type(address) is not int or not 0 <= address <= mask:
+            width = 4 if mask <= 0xFFFF else 6
+            raise ValueError(f"address must be an integer in range 0x{0:0{width}X}..0x{mask:X}")
         return address
 
 

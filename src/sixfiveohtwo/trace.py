@@ -5,17 +5,22 @@ values, one processor boundary per line (docs/trace-schema.md). Two cores
 that produce equal traces for the same program and host behave identically as
 far as software can tell; ``first_trace_divergence`` finds where they do not
 without reading either trace to the end.
+
+The record type (``StepRecord`` or a subclass for another part) gives the
+state fields, the boundary kinds and the instruction decoder, so the same
+functions read and compare another 65xx-family core's traces: pass its
+``record_type`` to :func:`read_trace` and :func:`step_record_from_dict`.
 """
 
 import json
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, fields, replace
+from functools import cache
 from itertools import zip_longest
 from typing import TextIO
 
-from sixfiveohtwo.debug import BoundaryKind, DebugSession, StepRecord
-from sixfiveohtwo.disasm import Instruction, disassemble_bytes
-from sixfiveohtwo.state import CPUState
+from sixfiveohtwo.debug import DebugSession, StepRecord
+from sixfiveohtwo.disasm import Instruction
 
 TraceValue = int | bool | str | tuple[str, ...] | None
 TRACE_SCHEMA_VERSION = 1
@@ -74,7 +79,7 @@ def compare_step_records(left: StepRecord, right: StepRecord) -> tuple[TraceDiff
     Bus accesses are compared only when both records carry them.
     """
 
-    if type(left) is not StepRecord or type(right) is not StepRecord:
+    if not isinstance(left, StepRecord) or not isinstance(right, StepRecord):
         raise TypeError("left and right must be StepRecord values")
 
     differences: list[TraceDifference] = []
@@ -86,8 +91,12 @@ def compare_step_records(left: StepRecord, right: StepRecord) -> tuple[TraceDiff
     if left.accesses is not None and right.accesses is not None:
         # Absent means "not recorded", not "no accesses": compare only when both
         # sides tracked them.
+        width = 4 if type(left).address_mask <= 0xFFFF else 6
         _append(
-            differences, "accesses", _access_texts(left.accesses), _access_texts(right.accesses)
+            differences,
+            "accesses",
+            _access_texts(left.accesses, width),
+            _access_texts(right.accesses, width),
         )
     return tuple(differences)
 
@@ -105,18 +114,18 @@ def iter_trace_divergences(
     for position, pair in enumerate(zip_longest(left, right, fillvalue=_MISSING)):
         left_record, right_record = pair
         if left_record is _MISSING:
-            if type(right_record) is not StepRecord:
+            if not isinstance(right_record, StepRecord):
                 raise TypeError("right trace must contain only StepRecord values")
             difference = TraceDifference("record", None, "present")
             yield TraceDivergence(position, None, right_record, (difference,))
             continue
         if right_record is _MISSING:
-            if type(left_record) is not StepRecord:
+            if not isinstance(left_record, StepRecord):
                 raise TypeError("left trace must contain only StepRecord values")
             difference = TraceDifference("record", "present", None)
             yield TraceDivergence(position, left_record, None, (difference,))
             continue
-        if type(left_record) is not StepRecord or type(right_record) is not StepRecord:
+        if not isinstance(left_record, StepRecord) or not isinstance(right_record, StepRecord):
             raise TypeError("traces must contain only StepRecord values")
         differences = compare_step_records(left_record, right_record)
         if differences:
@@ -159,7 +168,7 @@ def first_session_divergence(
 def step_record_to_dict(record: StepRecord) -> dict[str, object]:
     """Return the versioned JSON-compatible representation of one record."""
 
-    if type(record) is not StepRecord:
+    if not isinstance(record, StepRecord):
         raise TypeError("record must be a StepRecord")
     instruction = record.instruction
     encoded: dict[str, object] = {
@@ -183,7 +192,9 @@ def step_record_to_dict(record: StepRecord) -> dict[str, object]:
     return encoded
 
 
-def step_record_from_dict(value: object) -> StepRecord:
+def step_record_from_dict(
+    value: object, *, record_type: type[StepRecord] = StepRecord
+) -> StepRecord:
     """Reconstruct one strictly validated record from its versioned representation."""
 
     root = _require_object(value, "record")
@@ -202,17 +213,17 @@ def step_record_from_dict(value: object) -> StepRecord:
     if type(kind_value) is not str:
         raise ValueError("kind must be a string")
     try:
-        kind = BoundaryKind(kind_value)
+        kind = record_type.kind_type(kind_value)
     except ValueError as exc:
         raise ValueError(f"unsupported boundary kind: {kind_value!r}") from exc
 
-    return StepRecord(
+    return record_type(
         sequence=sequence,
         kind=kind,
-        before=_state_from_dict(root["before"], "before"),
-        after=_state_from_dict(root["after"], "after"),
+        before=_state_from_dict(root["before"], "before", record_type.state_type),
+        after=_state_from_dict(root["after"], "after", record_type.state_type),
         cycles=cycles,
-        instruction=_instruction_from_dict(root["instruction"]),
+        instruction=_instruction_from_dict(root["instruction"], record_type),
         accesses=_accesses_from_list(root["accesses"]) if "accesses" in root else None,
     )
 
@@ -230,7 +241,9 @@ def write_trace(records: Iterable[StepRecord], stream: TextIO) -> int:
     return count
 
 
-def read_trace(stream: TextIO) -> Iterator[StepRecord]:
+def read_trace(
+    stream: TextIO, *, record_type: type[StepRecord] = StepRecord
+) -> Iterator[StepRecord]:
     """Yield strictly validated records lazily from a JSON Lines text stream."""
 
     if not callable(getattr(stream, "__iter__", None)):
@@ -242,7 +255,7 @@ def read_trace(stream: TextIO) -> Iterator[StepRecord]:
             continue
         try:
             value = json.loads(line)
-            yield step_record_from_dict(value)
+            yield step_record_from_dict(value, record_type=record_type)
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
             raise ValueError(f"invalid trace record at line {line_number}: {exc}") from exc
 
@@ -254,17 +267,19 @@ def _append(
         differences.append(TraceDifference(path, left, right))
 
 
-_STATE_FIELDS = tuple(field.name for field in fields(CPUState))
+@cache
+def _state_fields(state_type: type) -> tuple[str, ...]:
+    return tuple(field.name for field in fields(state_type))
 
 
 def _compare_state(
-    differences: list[TraceDifference], prefix: str, left: CPUState, right: CPUState
+    differences: list[TraceDifference], prefix: str, left: object, right: object
 ) -> None:
     if left == right:
         # The common case in a lockstep diff: one tuple comparison instead of
         # walking the fields.
         return
-    for name in _STATE_FIELDS:
+    for name in _state_fields(type(left)):
         _append(differences, f"{prefix}.{name}", getattr(left, name), getattr(right, name))
 
 
@@ -287,8 +302,8 @@ def _compare_instruction(
     _append(differences, "instruction.operands", left.operands, right.operands)
 
 
-def _access_texts(accesses: tuple[tuple[str, int, int], ...]) -> tuple[str, ...]:
-    return tuple(f"{kind} {address:04X}={value:02X}" for kind, address, value in accesses)
+def _access_texts(accesses: tuple[tuple[str, int, int], ...], width: int) -> tuple[str, ...]:
+    return tuple(f"{kind} {address:0{width}X}={value:02X}" for kind, address, value in accesses)
 
 
 def _accesses_from_list(value: object) -> tuple[tuple[str, int, int], ...]:
@@ -299,18 +314,15 @@ def _accesses_from_list(value: object) -> tuple[tuple[str, int, int], ...]:
     return tuple((kind, address, data) for kind, address, data in value)
 
 
-def _state_to_dict(state: CPUState) -> dict[str, int | bool | None]:
-    return {name: getattr(state, name) for name in _STATE_FIELDS}
+def _state_to_dict(state: object) -> dict[str, int | bool | None]:
+    return {name: getattr(state, name) for name in _state_fields(type(state))}
 
 
-_STATE_FIELD_SET = frozenset(_STATE_FIELDS)
-
-
-def _state_from_dict(value: object, name: str) -> CPUState:
+def _state_from_dict(value: object, name: str, state_type: type) -> object:
     encoded = _require_object(value, name)
-    _require_keys(encoded, name, _STATE_FIELD_SET)
+    _require_keys(encoded, name, set(_state_fields(state_type)))
     try:
-        return CPUState(**encoded)
+        return state_type(**encoded)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"invalid {name} CPU state: {exc}") from exc
 
@@ -319,7 +331,7 @@ _INSTRUCTION_REQUIRED = {"address", "data"}
 _INSTRUCTION_TEXT = {"mnemonic", "operands"}
 
 
-def _instruction_from_dict(value: object) -> Instruction | None:
+def _instruction_from_dict(value: object, record_type: type[StepRecord]) -> Instruction | None:
     """Decode a record's instruction from its bytes; keep the text the record gives.
 
     A trace written by this package carries ``mnemonic`` and ``operands``. An
@@ -344,10 +356,14 @@ def _instruction_from_dict(value: object) -> Instruction | None:
     except ValueError as exc:
         raise ValueError("instruction.data must be a hexadecimal string") from exc
     address = encoded["address"]
-    if type(address) is not int or not 0 <= address <= 0xFFFF:
-        raise ValueError("instruction.address must be an integer in range 0x0000..0xFFFF")
+    mask = record_type.address_mask
+    if type(address) is not int or not 0 <= address <= mask:
+        width = 4 if mask <= 0xFFFF else 6
+        raise ValueError(
+            f"instruction.address must be an integer in range 0x{0:0{width}X}..0x{mask:X}"
+        )
     try:
-        derived = disassemble_bytes(instruction_data, address)
+        derived = record_type.decode(instruction_data, address)
     except ValueError as exc:
         raise ValueError(f"instruction.data is not a decodable encoding: {exc}") from exc
     if derived.data != instruction_data:
