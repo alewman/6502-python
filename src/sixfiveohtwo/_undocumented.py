@@ -149,13 +149,15 @@ class UndocumentedMixin:
 
     def _store_and_high(self, address: int, index: int, value: int) -> None:
         # The stored value is ANDed with the base address's high byte plus
-        # one; when indexing crossed a page, that same value replaces the
-        # high byte of the address written (NMS pp. 48-49).
+        # one; when indexing crossed a page, that ANDed value replaces the
+        # high byte of the address written. After a cycle N stretched by a
+        # DMA the AND drops out of the stored value but not of the address
+        # (NMS pp. 48-49, the table on p. 48; ``dma_stalled``).
         base = (address - index) & 0xFFFF
-        value &= ((base >> 8) + 1) & 0xFF
+        anded = value & ((base >> 8) + 1) & 0xFF
         if (address ^ base) & 0xFF00:
-            address = (value << 8) | (address & 0xFF)
-        self._write(address, value)
+            address = (anded << 8) | (address & 0xFF)
+        self._write(address, value if self.dma_stalled else anded)
 
     def _op_sha(self, address: int) -> None:
         """SHA -- A AND X AND (H + 1) -> M (NMS p. 50)."""

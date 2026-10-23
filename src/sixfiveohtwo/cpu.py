@@ -77,6 +77,14 @@ class MOS6502(
     ane_constant = 0xEE
     lxa_constant = 0xEE
 
+    #: Set by a host whose bus callback stretched the current read cycle with
+    #: RDY low (a DMA), cleared by it on the next read that is not. SHA, SHX,
+    #: SHY and TAS look at it on their write: after a stretched cycle N the
+    #: value is stored without its AND (H + 1), so SHY becomes a true STY; the
+    #: page-crossing address is unchanged (NMS p. 48, table). The core has no
+    #: RDY input, so it never sets this itself (docs/undocumented-behavior.md).
+    dma_stalled = False
+
     def __init__(self, read_byte: ReadByte, write_byte: WriteByte) -> None:
         for name, bus in zip(_BUS, (read_byte, write_byte), strict=True):
             if not callable(bus):
@@ -235,6 +243,23 @@ class MOS6502(
         self._request(self._requests & ~NMI_LATCH)
         if self._polled is not None:
             self._polled &= ~NMI_LATCH
+
+    def note_stall(self) -> None:
+        """Say, from inside a read callback, that RDY is holding this read (a DMA).
+
+        Call it as the stall begins and again after each halted cycle, then
+        make the access. The halted chip repeats the cycle and its interrupt
+        detectors keep sampling, so a request raised during the stall is
+        polled at the end of the read it stretched, whichever cycle that is,
+        even the last (perfect6502 with RDY held low; docs/start-here.md). A
+        taken branch's next-opcode read, which does not poll, takes requests
+        raised by the start of the stall's last halted cycle, not during it
+        (perfect6502; AccuracyCoin "Interrupt flag latency" test A).
+        """
+        self._stalled_before = self._stalled
+        self._stalled = self._requests
+        if self._deferred is not None:
+            self._confirm()
 
     # -- state -----------------------------------------------------------
 
