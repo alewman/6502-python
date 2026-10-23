@@ -4,11 +4,16 @@
 ``interact(input, output)`` is a line-oriented loop with no terminal
 dependencies. ``python -m sixfiveohtwo`` starts one on a binary. The command set
 is z80-python's, with 6502 registers and interrupt inputs.
+
+A core for another 65xx-family part subclasses :class:`CommandDebugger` over
+its own :class:`~sixfiveohtwo.debug.DebugSession` subclass and overrides the
+hooks below the class docstring (prompt, registers, state and address text,
+disassembly, the subroutine calls ``over`` runs through).
 """
 
 import shlex
 from dataclasses import dataclass
-from typing import TextIO
+from typing import Any, ClassVar, TextIO
 
 from sixfiveohtwo.debug import DebugSession, RunResult, StepRecord, StopReason
 from sixfiveohtwo.disasm import ByteReader, Instruction, disassemble
@@ -107,31 +112,6 @@ def _format_state(state: CPUState) -> tuple[str, ...]:
     )
 
 
-def _format_instruction(instruction: Instruction) -> str:
-    encoded = " ".join(f"{value:02X}" for value in instruction.data)
-    return f"{instruction.address:04X}  {encoded:<11}  {instruction.text}"
-
-
-def _format_record(record: StepRecord) -> str:
-    if record.instruction is not None:
-        work = _format_instruction(record.instruction)
-    else:
-        work = f"{record.before.pc:04X}  {record.kind.value}"
-    return f"#{record.sequence} {work} -> PC={record.after.pc:04X} +{record.cycles}"
-
-
-def _format_run(result: RunResult) -> str:
-    line = (
-        f"stopped={result.reason.value} steps={result.steps} "
-        f"instructions={result.instructions} cycles={result.cycles} PC={result.state.pc:04X}"
-    )
-    if result.reason is StopReason.WATCHPOINT:
-        line += " " + " ".join(
-            f"{kind} {address:04X}={value:02X}" for kind, address, value in result.hits
-        )
-    return line
-
-
 _ALIASES = {
     "?": "help",
     "r": "registers",
@@ -148,10 +128,68 @@ _ALIASES = {
 class CommandDebugger:
     """Parse and execute portable debugger commands against a DebugSession."""
 
+    #: The prompt :meth:`interact` shows.
+    prompt: ClassVar[str] = "6502> "
+    #: Registers ``set`` accepts, with their largest values.
+    registers: ClassVar[dict[str, int]] = _REGISTERS
+    #: The help text.
+    help_lines: ClassVar[tuple[str, ...]] = _HELP
+    #: Mnemonics ``over`` runs through to their return.
+    call_mnemonics: ClassVar[frozenset[str]] = frozenset(("JSR",))
+
     def __init__(self, session: DebugSession) -> None:
-        if type(session) is not DebugSession:
+        if not isinstance(session, DebugSession):
             raise TypeError("session must be a DebugSession")
         self.session = session
+        self.address_mask = session.record_type.address_mask
+
+    # -- hooks a subclass for another part overrides ----------------------
+
+    def format_state(self, state: Any) -> tuple[str, ...]:
+        """The lines ``registers`` prints."""
+        return _format_state(state)
+
+    def format_address(self, address: int) -> str:
+        return f"{address:04X}" if self.address_mask <= 0xFFFF else f"{address:06X}"
+
+    def disassemble_at(self, peek: ByteReader, address: int, state: Any) -> Instruction:
+        """The instruction at ``address``, decoded as the CPU in ``state`` would."""
+        return disassemble(peek, address)
+
+    def set_register(self, name: str, value: int) -> None:
+        """Set register ``name`` (a key of :attr:`registers`) on the CPU."""
+        if name == "P":
+            value = (value | 0x20) & ~0x10  # bit 5 reads as 1; B is not a flip-flop
+        setattr(self.session.cpu, name.lower(), value)
+
+    def format_instruction(self, instruction: Instruction) -> str:
+        encoded = " ".join(f"{value:02X}" for value in instruction.data)
+        return f"{self.format_address(instruction.address)}  {encoded:<11}  {instruction.text}"
+
+    def format_record(self, record: StepRecord) -> str:
+        session = self.session
+        if record.instruction is not None:
+            work = self.format_instruction(record.instruction)
+        else:
+            before = self.format_address(session.program_address(record.before))
+            work = f"{before}  {record.kind.value}"
+        after = self.format_address(session.program_address(record.after))
+        return f"#{record.sequence} {work} -> PC={after} +{record.cycles}"
+
+    def format_run(self, result: RunResult) -> str:
+        line = (
+            f"stopped={result.reason.value} steps={result.steps} "
+            f"instructions={result.instructions} cycles={result.cycles} "
+            f"PC={self.format_address(self.session.program_address(result.state))}"
+        )
+        if result.reason is StopReason.WATCHPOINT:
+            line += " " + " ".join(
+                f"{kind} {self.format_address(address)}={value:02X}"
+                for kind, address, value in result.hits
+            )
+        return line
+
+    # -- commands ---------------------------------------------------------
 
     def execute(self, command: str) -> CommandResult:
         """Execute one command and return deterministic printable lines."""
@@ -172,10 +210,10 @@ class CommandDebugger:
             return CommandResult(quit=True)
         if name == "help":
             self._arity(name, arguments, 0)
-            return CommandResult(_HELP)
+            return CommandResult(self.help_lines)
         if name in ("registers", "regs"):
             self._arity(name, arguments, 0)
-            return CommandResult(_format_state(self.session.target.capture_state()))
+            return CommandResult(self.format_state(self.session.target.capture_state()))
         if name == "step":
             return self._step(arguments)
         if name == "over":
@@ -186,18 +224,18 @@ class CommandDebugger:
             return self._continue(arguments)
         if name == "watch":
             self._arity(name, arguments, 1, 2)
-            address = _number(arguments[0], "address", maximum=0xFFFF)
+            address = _number(arguments[0], "address", maximum=self.address_mask)
             kind = arguments[1].lower() if len(arguments) == 2 else "rw"
             try:
                 self.session.add_watchpoint(address, kind)
             except ValueError as exc:
                 raise CommandError(str(exc)) from exc
-            return CommandResult((f"watchpoint added at {address:04X} ({kind})",))
+            return CommandResult((f"watchpoint added at {self.format_address(address)} ({kind})",))
         if name == "unwatch":
             self._arity(name, arguments, 1)
-            address = _number(arguments[0], "address", maximum=0xFFFF)
+            address = _number(arguments[0], "address", maximum=self.address_mask)
             self.session.remove_watchpoint(address)
-            return CommandResult((f"watchpoint removed from {address:04X}",))
+            return CommandResult((f"watchpoint removed from {self.format_address(address)}",))
         if name == "set":
             return self._set(arguments)
         if name == "irq":
@@ -211,23 +249,26 @@ class CommandDebugger:
             self.session.cpu.request_reset()
             record = self.session.step()
             return CommandResult(
-                (_format_record(record), *_format_state(self.session.target.capture_state()))
+                (
+                    self.format_record(record),
+                    *self.format_state(self.session.target.capture_state()),
+                )
             )
         if name == "break":
             self._arity(name, arguments, 1)
-            address = _number(arguments[0], "address", maximum=0xFFFF)
+            address = _number(arguments[0], "address", maximum=self.address_mask)
             self.session.add_breakpoint(address)
-            return CommandResult((f"breakpoint added at {address:04X}",))
+            return CommandResult((f"breakpoint added at {self.format_address(address)}",))
         if name == "delete":
             self._arity(name, arguments, 1)
-            address = _number(arguments[0], "address", maximum=0xFFFF)
+            address = _number(arguments[0], "address", maximum=self.address_mask)
             self.session.remove_breakpoint(address)
-            return CommandResult((f"breakpoint removed from {address:04X}",))
+            return CommandResult((f"breakpoint removed from {self.format_address(address)}",))
         if name == "breakpoints":
             self._arity(name, arguments, 0)
-            lines = tuple(f"{address:04X}" for address in sorted(self.session.breakpoints))
+            lines = tuple(self.format_address(a) for a in sorted(self.session.breakpoints))
             lines += tuple(
-                f"watch {address:04X} {kind}"
+                f"watch {self.format_address(address)} {kind}"
                 for address, kind in sorted(self.session.watchpoints.items())
             )
             return CommandResult(lines or ("no breakpoints",))
@@ -244,10 +285,11 @@ class CommandDebugger:
         input_stream: TextIO,
         output_stream: TextIO,
         *,
-        prompt: str = "6502> ",
+        prompt: str | None = None,
     ) -> None:
         """Run a line-oriented debugger loop over supplied text streams."""
 
+        prompt = self.prompt if prompt is None else prompt
         while True:
             output_stream.write(prompt)
             output_stream.flush()
@@ -268,54 +310,55 @@ class CommandDebugger:
         self._arity("step", arguments, 0, 1)
         count = _positive(arguments[0], "count", maximum=10_000) if arguments else 1
         records = tuple(self.session.step() for _ in range(count))
-        return CommandResult(tuple(_format_record(record) for record in records))
+        return CommandResult(tuple(self.format_record(record) for record in records))
 
     def _over(self, arguments: list[str]) -> CommandResult:
         self._arity("over", arguments, 0)
-        state = self.session.target.capture_state()
-        instruction = disassemble(self._require_peek(), state.pc)
-        if instruction.mnemonic != "JSR":
+        session = self.session
+        state = session.target.capture_state()
+        pc = session.program_address(state)
+        instruction = self.disassemble_at(self._require_peek(), pc, state)
+        if instruction.mnemonic not in self.call_mnemonics:
             return self._step([])
         # Run the subroutine through: stop when control is back at the
         # instruction after the JSR with the stack where it was.
-        lines = [_format_record(self.session.step())]
+        lines = [self.format_record(session.step())]
         for _ in range(1_000_000):
-            now = self.session.target.capture_state()
-            if now.pc == instruction.next_address and now.s == state.s:
+            now = session.target.capture_state()
+            now_pc = session.program_address(now)
+            if now_pc == instruction.next_address and now.s == state.s:
                 break
-            if now.pc in self.session.breakpoints:
-                lines.append(f"breakpoint at {now.pc:04X}")
+            if now_pc in session.breakpoints:
+                lines.append(f"breakpoint at {self.format_address(now_pc)}")
                 break
-            result = self.session.run(max_steps=1, stop_on_halt=False)
+            result = session.run(max_steps=1, stop_on_halt=False)
             if result.reason is not StopReason.STEP_LIMIT:
-                lines.append(_format_run(result))
+                lines.append(self.format_run(result))
                 break
         else:
             lines.append("gave up after 1,000,000 steps")
-        return CommandResult((*lines, *_format_state(self.session.target.capture_state())))
+        return CommandResult((*lines, *self.format_state(session.target.capture_state())))
 
     def _continue(self, arguments: list[str]) -> CommandResult:
         self._arity("continue", arguments, 0)
         steps = 1_000_000
         lines = []
         # run() stops before a breakpoint without moving, so step off one first.
-        if self.session.target.capture_state().pc in self.session.breakpoints:
-            lines.append(_format_record(self.session.step()))
+        session = self.session
+        if session.program_address(session.target.capture_state()) in session.breakpoints:
+            lines.append(self.format_record(session.step()))
             steps -= 1
-        lines.append(_format_run(self.session.run(max_steps=steps)))
+        lines.append(self.format_run(session.run(max_steps=steps)))
         return CommandResult(tuple(lines))
 
     def _set(self, arguments: list[str]) -> CommandResult:
         self._arity("set", arguments, 2)
         register = arguments[0].upper()
-        if register not in _REGISTERS:
-            raise CommandError(f"no register {register}; set takes {' '.join(_REGISTERS)}")
-        value = _number(arguments[1], register, maximum=_REGISTERS[register])
-        cpu = self.session.cpu
-        if register == "P":
-            value = (value | 0x20) & ~0x10  # bit 5 reads as 1; B is not a flip-flop
-        setattr(cpu, register.lower(), value)
-        return CommandResult(_format_state(cpu.capture_state()))
+        if register not in self.registers:
+            raise CommandError(f"no register {register}; set takes {' '.join(self.registers)}")
+        value = _number(arguments[1], register, maximum=self.registers[register])
+        self.set_register(register, value)
+        return CommandResult(self.format_state(self.session.cpu.capture_state()))
 
     def _interrupt(self, arguments: list[str]) -> CommandResult:
         self._arity("irq", arguments, 1)
@@ -334,42 +377,47 @@ class CommandDebugger:
         steps = _positive(arguments[0], "steps")
         cycles = _positive(arguments[1], "cycles") if len(arguments) == 2 else None
         result = self.session.run(max_steps=steps, max_cycles=cycles)
-        return CommandResult((_format_run(result),))
+        return CommandResult((self.format_run(result),))
 
     def _disassemble(self, arguments: list[str]) -> CommandResult:
         self._arity("disassemble", arguments, 0, 2)
         peek = self._require_peek()
         state = self.session.target.capture_state()
-        address = _number(arguments[0], "address", maximum=0xFFFF) if arguments else state.pc
+        address = (
+            _number(arguments[0], "address", maximum=self.address_mask)
+            if arguments
+            else self.session.program_address(state)
+        )
         count = _positive(arguments[1], "count", maximum=256) if len(arguments) == 2 else 8
         instructions = []
         for _ in range(count):
-            instruction = disassemble(peek, address)
+            instruction = self.disassemble_at(peek, address, state)
             instructions.append(instruction)
             address = instruction.next_address
-        return CommandResult(tuple(_format_instruction(item) for item in instructions))
+        return CommandResult(tuple(self.format_instruction(item) for item in instructions))
 
     def _memory(self, arguments: list[str]) -> CommandResult:
         self._arity("memory", arguments, 1, 2)
         peek = self._require_peek()
-        address = _number(arguments[0], "address", maximum=0xFFFF)
+        mask = self.address_mask
+        address = _number(arguments[0], "address", maximum=mask)
         length = _positive(arguments[1], "length", maximum=256) if len(arguments) == 2 else 16
         lines = []
         for offset in range(0, length, 16):
-            row_address = (address + offset) & 0xFFFF
+            row_address = (address + offset) & mask
             row_length = min(16, length - offset)
             values = [
-                self._read_peek(peek, (row_address + column) & 0xFFFF)
-                for column in range(row_length)
+                self._read_peek(peek, (row_address + column) & mask) for column in range(row_length)
             ]
-            lines.append(f"{row_address:04X}  {' '.join(f'{value:02X}' for value in values)}")
+            text = " ".join(f"{value:02X}" for value in values)
+            lines.append(f"{self.format_address(row_address)}  {text}")
         return CommandResult(tuple(lines))
 
     def _history(self, arguments: list[str]) -> CommandResult:
         self._arity("history", arguments, 0, 1)
         count = _positive(arguments[0], "count", maximum=10_000) if arguments else 16
         records = self.session.history[-count:]
-        lines = tuple(_format_record(record) for record in records)
+        lines = tuple(self.format_record(record) for record in records)
         return CommandResult(lines or ("history empty",))
 
     def _require_peek(self) -> ByteReader:
